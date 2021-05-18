@@ -1,0 +1,6 @@
+# Name,   Type, SubType, Offset,  Size, Flags
+# NVS for wifi min recommended 0x3000 -> 0x2000 = absolute minimum because can only erase 0x1000 at once, no ota, some empty pages, 3MB app, 1MB spiffs
+nvs,      data, nvs,     0x9000, 0x5000,
+nvs2,     data, nvs,     0xE000, 0x2000,
+app0,     app,  ota_0,   0x10000, 0x300000,
+spiffs,   data, spiffs,  0x310000,0xF0000,

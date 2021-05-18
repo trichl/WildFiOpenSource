@@ -1,0 +1,7 @@
+setup.py
+esp_windows_curses.egg-info/PKG-INFO
+esp_windows_curses.egg-info/SOURCES.txt
+esp_windows_curses.egg-info/dependency_links.txt
+esp_windows_curses.egg-info/not-zip-safe
+esp_windows_curses.egg-info/requires.txt
+esp_windows_curses.egg-info/top_level.txt

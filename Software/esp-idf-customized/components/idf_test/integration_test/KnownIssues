@@ -1,0 +1,7 @@
+
+# BT heap size issue
+ESP32.BTSTK_MISC_0301
+
+# GATT read multiple
+ESP32.BTSTK_GATT_27002
+ESP32.BTSTK_GATT_27003

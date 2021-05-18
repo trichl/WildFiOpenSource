@@ -1,0 +1,245 @@
+package com.timm.esp32datadownloader;
+
+import android.util.Log;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Date;
+
+class DecoderParameters {
+    public final static String PREFIX = "NNNNNN:PPPPPPPP:VVVV:"; // "NNNNNN:BBBB:HHHH:VVVV:"
+    public final static String POSTFIX = "NNNNNN";
+    public final static int PAYLOAD_LEN = 32 * 2048;
+    public final static int PAYLOAD_LEN_COMPLETE = (PREFIX.length() + PAYLOAD_LEN + POSTFIX.length());
+}
+
+class BlackforestTrackerSetting {
+    public static int headerLen = 29;
+    public static int RAMDataLen = 3840;
+    public static int newDataLen = 972;
+    public static final double ACC_DATA_TO_G_MAX_2G_SETTING = 0.000061035; // converts raw data to mg (with default max 2G setting)
+    public static int getAccDataLen() { return headerLen + RAMDataLen + newDataLen; }
+}
+
+class HalfBlock {
+    public String tagName;
+    public long pagePointer;
+    public long voltage;
+    public byte[] payload;
+
+    public static boolean check(ArrayList<HalfBlock> halfBlocks) {
+        boolean first = true;
+        long startPageAddress = 0;
+        for(HalfBlock h : halfBlocks) {
+            if(first) {
+                first = false;
+                startPageAddress = h.pagePointer;
+                Log.d("decoder", "check: starting at page address " + startPageAddress);
+            }
+            else {
+                if(h.pagePointer != startPageAddress + 32) {
+                    Log.d("decoder", "error at page address " + h.pagePointer + " vs. " + startPageAddress + " + 32");
+                    return false;
+                }
+                startPageAddress += 32;
+            }
+        }
+        Log.d("decoder", "check: all good, page pointers are consecutive");
+        return true;
+    }
+
+    public void fillPrefixData(String prefixString) {
+        tagName = prefixString.substring(0, 6);
+        pagePointer = Long.parseLong(prefixString.substring(7, 15), 16);
+        voltage = Long.parseLong(prefixString.substring(16, 20), 16);
+        Log.d("decoder", "tagName: " + tagName + ", pagePointer: " + pagePointer + ", voltage: " + voltage);
+    }
+
+    public HalfBlock(byte[] data) {
+        byte[] prefix = Arrays.copyOfRange(data, 0, DecoderParameters.PREFIX.length());
+        String prefixString = new String(prefix, StandardCharsets.UTF_8);
+        byte[] postfix = Arrays.copyOfRange(data, data.length - DecoderParameters.POSTFIX.length(), data.length);
+        String postfixString = new String(postfix, StandardCharsets.UTF_8);
+        payload = Arrays.copyOfRange(data, DecoderParameters.PREFIX.length(), data.length - DecoderParameters.POSTFIX.length());
+        //Log.d("decoder", "Prefix: " + prefixString + ", Postfix: " + postfixString + ", PayloadLen: " + payload.length);
+        fillPrefixData(prefixString);
+    }
+}
+
+class LogEntry {
+    public long timestamp, startCnt, volt, temp, humidity, pressure, tempBmx, fifoLen, lastErrorId, errorCnt;
+    public double voltDouble, tempDouble, humidityDouble;
+    public Date date; // from timestamp
+    public boolean datasetError;
+    //public ArrayList<AccEntry> accEntries;
+
+    public LogEntry(String dataset) {
+        if(dataset.length() != (BlackforestTrackerSetting.getAccDataLen() * 2)) {
+            datasetError = true;
+            return;
+        }
+        //accEntries = new ArrayList<>();
+        datasetError = false;
+        timestamp = Long.parseLong(dataset.substring(0,8), 16);
+        fifoLen = Long.parseLong(dataset.substring(48,52), 16);
+
+        date = new Date(timestamp * 1000);
+        startCnt = Long.parseLong(dataset.substring(8,16), 16);
+        volt = Long.parseLong(dataset.substring(16,24), 16);
+        temp = Long.parseLong(dataset.substring(24,28), 16);
+        humidity = Long.parseLong(dataset.substring(28,36), 16);
+        pressure = Long.parseLong(dataset.substring(36,44), 16);
+        tempBmx = Long.parseLong(dataset.substring(44,48), 16);
+        lastErrorId = Long.parseLong(dataset.substring(52,54), 16);
+        errorCnt = Long.parseLong(dataset.substring(54,58), 16);
+        voltDouble = volt / 1000.;
+        tempDouble = temp / 100.;
+        humidityDouble = humidity / 1000.;
+
+        //createAccData(dataset.substring(58,58+toIntExact(2 * fifoLen)));
+    }
+
+    public double bmxTempToCelsius() {
+        double temp = tempBmx;
+        if(tempBmx > 0x8000) {
+            // f(0xFFFF) = 23 - (0.5^9)
+            // f(0x8001) = -41 + (0.5^9)
+            double m = (-41. + Math.pow(0.5,9)) - (23. - Math.pow(0.5,9));
+            m = m / (0x8001 - 0xFFFF);
+            double b = (-41. + Math.pow(0.5,9)) - (m*0x8001);
+            temp = (m * temp) + b;
+        }
+        else {
+            temp *= 2.;
+            temp /= 10.;
+            temp += 2300.;
+            temp /= 100;
+        }
+        return temp;
+    }
+
+    public String serializeHeader() {
+        return timestamp+","+date+","+startCnt+","+volt+","+temp+","+humidity+","+pressure+","+tempBmx+","+fifoLen+","+lastErrorId+","+errorCnt+","+voltDouble+","+bmxTempToCelsius()+","+tempDouble+","+pressureToHeight()+","+humidityDouble;
+    }
+
+    public double pressureToHeight() {
+        double height;
+        height = (1 - Math.pow((pressure / 100.) / 1013.25, 0.190284)) * 145366.45 * 0.3048;
+        return height;
+    }
+}
+
+class DataStream {
+    byte[] stream;
+    long firstPageAddress = 0; // 0 .. 2047
+
+    public long estimateDataOffset() {
+        long bytesBeforeStream = firstPageAddress * 2048;
+        long offset = BlackforestTrackerSetting.getAccDataLen() - (bytesBeforeStream % BlackforestTrackerSetting.getAccDataLen());
+        Log.d("decoder", "Data before stream: " + bytesBeforeStream + ", offset: " + offset);
+        return offset;
+    }
+
+    public void extractLogEntries(ArrayList<LogEntry> logEntries) {
+        long offset = estimateDataOffset();
+        long cnt = 0;
+        String line = "";
+        LogEntry e;
+        long limit = 50;
+        for(Byte val : stream) {
+            line += String.format("%02X", val);
+            cnt++;
+            if(cnt == offset) {
+                e = new LogEntry(line);
+                if(e.datasetError){
+                    Log.d("decoder", "Log entry dataset error"); // happens at first dataset
+                }
+                else {
+                    logEntries.add(e);
+                    Log.d("decoder", "Added: " + e.serializeHeader());
+                }
+                cnt = 0;
+                line = "";
+                offset = BlackforestTrackerSetting.getAccDataLen();
+                limit--;
+                if(limit == 0) break;
+            }
+        }
+    }
+
+    public DataStream(ArrayList<HalfBlock> halfBlocks) {
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream( );
+        boolean first = true;
+        for(HalfBlock h : halfBlocks) {
+            if(first) {
+                first = false;
+                firstPageAddress = h.pagePointer;
+            }
+            try {
+                outputStream.write(h.payload);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+        stream = outputStream.toByteArray( );
+        Log.d("decoder", "Stream is " + stream.length + " Bytes long, starting at address " + firstPageAddress);
+    }
+
+
+}
+
+public class ESP32BinaryDecoder {
+
+    private int fileLength;
+
+    private ArrayList<HalfBlock> halfBlocks = new ArrayList<>();
+    private DataStream dataStream;
+    private ArrayList<LogEntry> logEntries = new ArrayList<>();
+    //private ArrayList<String> tagNames = new ArrayList<>();
+
+    public boolean decodeData(String tagName) {
+        Log.d("decoder", "removing everything except " + tagName);
+        for(HalfBlock h : halfBlocks) {
+            if(!h.tagName.equals(tagName)) {
+                halfBlocks.remove(h);
+            }
+        }
+        if(!HalfBlock.check(halfBlocks)) {
+            Log.d("decoder", "half block error");
+            return false;
+        }
+        dataStream = new DataStream(halfBlocks);
+        dataStream.extractLogEntries(logEntries); // LONG TIME!!!
+        return true;
+    }
+
+    public boolean decodeFile(byte[] fileData, ArrayList<String> tagNames) {
+        fileLength = (int) fileData.length;
+        Log.d("decoder", "File length: " + fileData.length);
+        if(fileLength % DecoderParameters.PAYLOAD_LEN_COMPLETE != 0) {
+            Log.d("decoder", "file corrupt, cannot divide by " + DecoderParameters.PAYLOAD_LEN_COMPLETE);
+            return false;
+        }
+        else {
+            long numberHalfBlocks = fileLength / DecoderParameters.PAYLOAD_LEN_COMPLETE;
+            Log.d("decoder", "file okay, half blocks = " + numberHalfBlocks);
+            for(int i=0; i<numberHalfBlocks; i++) {
+                int index = i * DecoderParameters.PAYLOAD_LEN_COMPLETE;
+                byte[] subArray = Arrays.copyOfRange(fileData, index, index + DecoderParameters.PAYLOAD_LEN_COMPLETE);
+                Log.d("decoder", "half block " + i + ": " + subArray.length + " bytes");
+                HalfBlock h = new HalfBlock(subArray);
+                halfBlocks.add(h);
+                if(!tagNames.contains(h.tagName)) tagNames.add(h.tagName);
+            }
+            Log.d("decoder", "start to decode data stream of " + numberHalfBlocks + " half blocks");
+            Log.d("decoder", "found " + tagNames.size() + " tag names");
+            for(String tagName : tagNames) {
+                Log.d("decoder", "found tag name: " + tagName);
+            }
+            return true;
+        }
+    }
+}

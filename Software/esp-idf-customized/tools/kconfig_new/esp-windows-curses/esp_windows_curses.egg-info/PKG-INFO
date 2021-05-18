@@ -1,0 +1,10 @@
+Metadata-Version: 1.0
+Name: esp-windows-curses
+Version: 0.1
+Summary: Wrapper for the windows-curses package
+Home-page: https://www.espressif.com
+Author: Espressif Systems
+Author-email: donotreply@espressif.com
+License: Apache License 2.0
+Description: UNKNOWN
+Platform: UNKNOWN
