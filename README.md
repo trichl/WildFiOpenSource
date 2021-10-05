@@ -17,7 +17,7 @@ Open source modular biologger with 2.4 GHz connectivity (BLE, WiFi, ESP NOW). Th
    * After installing the IDE the pre-configured project can be opened: [Software/WildFiFirmware](Software/WildFiFirmware)
    * The sub folder [firmware](Software/WildFiFirmware/firmware) includes productive software
    * The sub folders [testREVX](Software/WildFiFirmware) include test software
-   * The project is configured in [Software/WildFiSoftwareArchitecture/WildFiFirmware/platformio.ini](Software/WildFiSoftwareArchitecture/WildFiFirmware/platformio.ini) (the parameter src_dir selects the application that shall be compiled)
+   * The project is configured in [Software/WildFiFirmware/platformio.ini](Software/WildFiFirmware/platformio.ini) (the parameter src_dir selects the application that shall be compiled)
 * Or Eclipse (eclipse-cpp-2020-09-R-win32-x86_64) and idf-eclipse plugin (tutorial: https://github.com/espressif/idf-eclipse-plugin/blob/master/README.md), project stub with complete software architecture integration for Eclipse is located in [Software/WildFiSoftwareArchitecture](Software/WildFiSoftwareArchitecture)
 
 # Flashing
