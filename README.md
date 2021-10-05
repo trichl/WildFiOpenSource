@@ -1,6 +1,8 @@
 # WildFi biologger
 Open source modular biologger with 2.4 GHz connectivity (BLE, WiFi, ESP NOW). This repository includes hardware design files of the WildFi tag and WildFi extensions, embedded software, software architecture, software for the ESP32 CAM gateways, the Android app, and decoding software.
 
+![WildFiTagREV6](https://github.com/trichl/WildFiOpenSource/blob/main/Hardware/WildFiTagREV6.png?raw=true)
+
 # Sensors and communication interfaces
 * The WildFi tag integrates an ESP32 Pico D4 and following additional components:
   * 9-axis IMU (Bosch BMX160)
