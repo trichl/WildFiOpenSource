@@ -10,10 +10,10 @@ Open source modular biologger with 2.4 GHz connectivity (BLE, WiFi, ESP NOW). Th
   * Energy harvester (STM SPV1050)
 * The WildFi tag has a 16-pin extension port for USB debugging and programming and a 20-pin extension port for attaching more sensors
 * The 20-pin extension port gives access to following communication and control interfaces:
-  * I2C (shared with Bosch BMX160, Bosch BME680 and Micro Crystal RV-8803-C7)
-  * SPI (shared with Micron MT29F2G01ABAGDWB-IT:G TR)
-  * I2S
-  * UART
+  * 1 x I2C (shared bus with Bosch BMX160, Bosch BME680 and Micro Crystal RV-8803-C7)
+  * 1 x SPI (shared bus with Micron MT29F2G01ABAGDWB-IT:G TR)
+  * 1 x I2S
+  * 1 x UART
   * 3 x GPIOs
   * 2 x power control lines
 
@@ -36,8 +36,8 @@ Open source modular biologger with 2.4 GHz connectivity (BLE, WiFi, ESP NOW). Th
    * The project is configured in [Software/WildFiFirmware/platformio.ini](Software/WildFiFirmware/platformio.ini) (the parameter src_dir selects the application that shall be compiled)
 * Or Eclipse (eclipse-cpp-2020-09-R-win32-x86_64) and idf-eclipse plugin (tutorial: https://github.com/espressif/idf-eclipse-plugin/blob/master/README.md), project stub with complete software architecture integration for Eclipse is located in [Software/WildFiSoftwareArchitecture](Software/WildFiSoftwareArchitecture)
 
-# Flashing
-* To flash software the WildFi tag is attached to the USB breakout board (red arrows indicate the programming board settings when no external battery is connected to the WildFi tag) und the USB connector to a computer:
+# Flashing the Firmware
+* To flash software on the ESP32, the WildFi tag needs to be attached to the USB breakout board (red arrows indicate the programming board settings when no external battery is connected to the WildFi tag) und the USB connector to a computer (flashing is done via the UART bridge that is integrated on the USB breakout board):
 
 ![WildFiTagProgramming](https://github.com/trichl/WildFiOpenSource/blob/main/FlashDownloadTool/WildFiTagProgramming.jpg?raw=true)
 
