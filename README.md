@@ -10,14 +10,14 @@ Open source modular biologger with 2.4 GHz connectivity (BLE, WiFi, ESP NOW). Th
 
 # Flashing
 * Using FlashDownloadTool in sub folder
-* Or PlatformIO (executes: C:\Users\[username]\.platformio\packages\tool-esptoolpy\esptool.py --chip esp32 --port "COM99" --baud 460800 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 40m --flash_size detect 0x10000 .pio\build\pico32\firmware.bin)
-* Or using FlashDownloadTool\esptool\esptool.py directly (see above for flashing command)
+* Or PlatformIO (executes: C:\\Users\\[username]\\.platformio\\packages\\tool-esptoolpy\\esptool.py --chip esp32 --port "COM99" --baud 460800 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 40m --flash_size detect 0x10000 .pio\\build\\pico32\\firmware.bin)
+* Or using FlashDownloadTool\\esptool\\esptool.py directly (see above for flashing command)
 
 # ESP-IDF
 * The ESP32 software is based on esp-idf-v4.1, see LICENSE file in Software\esp-idf-customized
 * Repository can be cloned from git: git clone -b v4.1 --recursive https://github.com/espressif/esp-idf.git esp-idf-v4.1
 * We implemented a slight modification of the ESP-IDF to make use of the full RTC RAM (https://github.com/espressif/esp-idf/commit/ef10c2576ff14afa033ef22105406399abc570af). The custom esp-idf can be found under Software\esp-idf-customized.
-* When using PlatformIO: copy content in Software\esp-idf-customized to C:\Users\[username]\.platformio\packages\framework-espidf
+* When using PlatformIO: copy content in Software\esp-idf-customized to C:\\Users\\[username]\\.platformio\\packages\\framework-espidf
 
 # Efuse Settings
 * First tag boot: flash voltage is set to 1.8V by MTDI pin (due to attached flash memory), leading to a flash error while booting RTCWDT_RTC_RESET (no side effects)
