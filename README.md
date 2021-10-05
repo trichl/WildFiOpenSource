@@ -2,7 +2,13 @@
 Open source modular biologger with 2.4 GHz connectivity (BLE, WiFi, ESP NOW). This repository includes hardware design files of the WildFi tag and WildFi extensions, embedded software, software architecture, software for the ESP32 CAM gateways, the Android app, and decoding software.
 
 # Pinout of the ESP32 Pico D4 and the extension ports
-![alt text](https://github.com/trichl/WildFiOpenSource/blob/main/Hardware/ESP32PinoutV2?raw=true)
+![ESP32PinoutV2](https://github.com/trichl/WildFiOpenSource/blob/main/Hardware/ESP32PinoutV2.png?raw=true)
+
+# Hardware Layouts
+* See sub folder Hardware
+* Designed with Autodesk Eagle 9.5.2
+* PCBs were produced and assembled by PCBWay (production-ready Gerber files and PCBWay settings in Hardware\\GerberProductionFiles)
+* Hardware\\WildFiTagREV6-Extension-Dummy.brd and Hardware\\WildFiTagREV6-Extension-Dummy.sch can be used for designing new extension boards
 
 # IDE (Windows)
 * Visual Studio Code (>= 1.54.3) + PlatformIO (Core >= 5.1.1, Home >= 3.3.4)
@@ -14,14 +20,14 @@ Open source modular biologger with 2.4 GHz connectivity (BLE, WiFi, ESP NOW). Th
 * Or using FlashDownloadTool\\esptool\\esptool.py directly (see above for flashing command)
 
 # ESP-IDF
-* The ESP32 software is based on esp-idf-v4.1, see LICENSE file in Software\esp-idf-customized
+* The ESP32 software is based on esp-idf-v4.1, see LICENSE file in Software\\esp-idf-customized
 * Repository can be cloned from git: git clone -b v4.1 --recursive https://github.com/espressif/esp-idf.git esp-idf-v4.1
-* We implemented a slight modification of the ESP-IDF to make use of the full RTC RAM (https://github.com/espressif/esp-idf/commit/ef10c2576ff14afa033ef22105406399abc570af). The custom esp-idf can be found under Software\esp-idf-customized.
-* When using PlatformIO: copy content in Software\esp-idf-customized to C:\\Users\\[username]\\.platformio\\packages\\framework-espidf
+* We implemented a slight modification of the ESP-IDF to make use of the full RTC RAM (https://github.com/espressif/esp-idf/commit/ef10c2576ff14afa033ef22105406399abc570af). The custom esp-idf can be found under Software\\esp-idf-customized.
+* When using PlatformIO: copy content in Software\\esp-idf-customized to C:\\Users\\[username]\\.platformio\\packages\\framework-espidf
 
 # Efuse Settings
 * First tag boot: flash voltage is set to 1.8V by MTDI pin (due to attached flash memory), leading to a flash error while booting RTCWDT_RTC_RESET (no side effects)
-* To fix: write flash voltage permanently to 3.3V (ignoring GPIO12 = MTDI pin): FlashDownloadTool\esptool\espefuse.py --port COM99 set_flash_voltage 3.3V (python espefuse.py -p COM99 set_flash_voltage 3.3V), sdkconfig: Serial flasher config: DIO and 40 MHz
+* To fix: write flash voltage permanently to 3.3V (ignoring GPIO12 = MTDI pin): FlashDownloadTool\\esptool\\espefuse.py --port COM99 set_flash_voltage 3.3V (python espefuse.py -p COM99 set_flash_voltage 3.3V), sdkconfig: Serial flasher config: DIO and 40 MHz
 * Python scripts require Python to be installed (get esptool via CMD: pip install esptool)
 
 # Attitude Estimator
