@@ -40,7 +40,7 @@ Open source modular biologger with 2.4 GHz connectivity (BLE, WiFi, ESP NOW). Th
   * bootloader.bin: the bootloader firmware
   * partitions.bin: includes the flash partition table for the ESP32
   * firmware.bin: includes the actual WildFi firmware
-  * When using PlatformIO the files are automatically generated in [Software/WildFiFirmware/.pio/build/pico32]([Software/WildFiFirmware/.pio/build/pico32)
+  * When using PlatformIO the files are automatically generated in Software/WildFiFirmware/.pio/build/pico32
 * Alternative IDE: Eclipse (eclipse-cpp-2020-09-R-win32-x86_64) and idf-eclipse plugin (tutorial: https://github.com/espressif/idf-eclipse-plugin/blob/master/README.md), project stub with complete software architecture integration for Eclipse is located in [Software/WildFiSoftwareArchitecture](Software/WildFiSoftwareArchitecture)
 
 # Flashing the Firmware
