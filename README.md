@@ -65,7 +65,8 @@ Open source modular biologger with 2.4 GHz connectivity (Bluetooth LE, WiFi, ESP
 # Efuse Settings (Optional)
 * First tag boot: flash voltage is set to 1.8V by MTDI pin (due to attached flash memory), leading to a flash error while booting and let the ESP32 perform a RTCWDT_RTC_RESET (no side effects)
 * To fix: write flash voltage permanently to 3.3V (ignoring GPIO12 = MTDI pin): [FlashDownloadTool/esptool/espefuse.py](FlashDownloadTool/esptool/espefuse.py) --port COM99 set_flash_voltage 3.3V (python espefuse.py -p COM99 set_flash_voltage 3.3V), sdkconfig settings: Serial flasher config: DIO and 40 MHz
-* Python scripts require Python to be installed (get esptool via CMD: pip install esptool)
+* Python scripts require Python to be installed
+* Get esptool via Windows command line: pip install esptool
 
 # Attitude Estimator
 * Based on: https://github.com/AIS-Bonn/attitude_estimator
