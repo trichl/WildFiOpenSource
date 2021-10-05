@@ -12,13 +12,17 @@ Open source modular biologger with 2.4 GHz connectivity (BLE, WiFi, ESP NOW). Th
 * PCBs were produced and assembled by PCBWay (production-ready Gerber files and PCBWay settings in Hardware\\GerberProductionFiles)
 * Hardware\\WildFiTagREV6-Extension-Dummy.brd and Hardware\\WildFiTagREV6-Extension-Dummy.sch can be used for designing new extension boards (please use Hardware\\GerberProductionFiles\\CONFIGURATION\\PCBWay_2_layer.cam for generating new Gerber files in Eagle)
 
-# IDE (Windows)
+# IDE for Software Development (Windows)
 * Visual Studio Code (>= 1.54.3) + PlatformIO (Core >= 5.1.1, Home >= 3.3.4)
-* Or Eclipse (eclipse-cpp-2020-09-R-win32-x86_64) and idf-eclipse plugin (tutorial: https://github.com/espressif/idf-eclipse-plugin/blob/master/README.md), project stub with complete software architecture integration for Eclipse is located in Software\WildFiSoftwareArchitecture
+   * After installing the IDE the pre-configured project can be opened: Software\\WildFiSoftwareArchitecture\\WildFiFirmware
+   * The sub folder firmware includes productive software
+   * The sub folders textREVX include test software
+   * The project is configured in Software\\WildFiSoftwareArchitecture\\WildFiFirmware\\platform.ini (the parameter src_dir selects the application that shall be compiled)
+* Or Eclipse (eclipse-cpp-2020-09-R-win32-x86_64) and idf-eclipse plugin (tutorial: https://github.com/espressif/idf-eclipse-plugin/blob/master/README.md), project stub with complete software architecture integration for Eclipse is located in Software\\WildFiSoftwareArchitecture
 
 # Flashing
 * Using FlashDownloadTool in sub folder
-* Or PlatformIO (executes: C:\\Users\\[username]\\.platformio\\packages\\tool-esptoolpy\\esptool.py --chip esp32 --port "COM99" --baud 460800 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 40m --flash_size detect 0x10000 .pio\\build\\pico32\\firmware.bin)
+* Or PlatformIO (automatically executes the following command: C:\\Users\\[username]\\.platformio\\packages\\tool-esptoolpy\\esptool.py --chip esp32 --port "COM99" --baud 460800 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 40m --flash_size detect 0x10000 .pio\\build\\pico32\\firmware.bin)
 * Or using FlashDownloadTool\\esptool\\esptool.py directly (see above for flashing command)
 
 # ESP-IDF
