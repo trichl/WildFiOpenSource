@@ -10,13 +10,13 @@ Open source modular biologger with 2.4 GHz connectivity (BLE, WiFi, ESP NOW). Th
 * See sub folder [Hardware](Hardware)
 * Designed with Autodesk Eagle 9.5.2
 * PCBs were produced and assembled by PCBWay (production-ready Gerber files and PCBWay settings in [Hardware/GerberProductionFiles](Hardware/GerberProductionFiles))
-* Hardware\\WildFiTagREV6-Extension-Dummy.brd and Hardware\\WildFiTagREV6-Extension-Dummy.sch can be used for designing new extension boards (please use Hardware\\GerberProductionFiles\\CONFIGURATION\\PCBWay_2_layer.cam for generating new Gerber files in Eagle)
+* [Hardware/WildFiTagREV6-Extension-Dummy.brd](Hardware/WildFiTagREV6-Extension-Dummy.brd) and [Hardware/WildFiTagREV6-Extension-Dummy.sch](Hardware/WildFiTagREV6-Extension-Dummy.sch) can be used for designing new extension boards (please use [Hardware/GerberProductionFiles/CONFIGURATION/PCBWay_2_layer.cam](Hardware/GerberProductionFiles/CONFIGURATION/PCBWay_2_layer.cam) for generating new Gerber files in Eagle)
 
 # IDE for Software Development (Windows)
 * Visual Studio Code (>= 1.54.3) + PlatformIO (Core >= 5.1.1, Home >= 3.3.4)
-   * After installing the IDE the pre-configured project can be opened: Software\\WildFiSoftwareArchitecture\\WildFiFirmware
-   * The sub folder firmware includes productive software
-   * The sub folders textREVX include test software
+   * After installing the IDE the pre-configured project can be opened: [Software/WildFiFirmware](Software/WildFiFirmware)
+   * The sub folder [firmware](Software/WildFiFirmware/firmware) includes productive software
+   * The sub folders testREVX include test software
    * The project is configured in Software\\WildFiSoftwareArchitecture\\WildFiFirmware\\platform.ini (the parameter src_dir selects the application that shall be compiled)
 * Or Eclipse (eclipse-cpp-2020-09-R-win32-x86_64) and idf-eclipse plugin (tutorial: https://github.com/espressif/idf-eclipse-plugin/blob/master/README.md), project stub with complete software architecture integration for Eclipse is located in Software\\WildFiSoftwareArchitecture
 
