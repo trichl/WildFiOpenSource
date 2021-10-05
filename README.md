@@ -21,7 +21,7 @@ Open source modular biologger with 2.4 GHz connectivity (BLE, WiFi, ESP NOW). Th
 * Or Eclipse (eclipse-cpp-2020-09-R-win32-x86_64) and idf-eclipse plugin (tutorial: https://github.com/espressif/idf-eclipse-plugin/blob/master/README.md), project stub with complete software architecture integration for Eclipse is located in Software\\WildFiSoftwareArchitecture
 
 # Flashing
-* To flash software please attach the WildFi tag to the USB breakout board (red arrows indicate the programming board settings when no external battery is connected to the WildFi tag):
+* To flash software the WildFi tag is attached to the USB breakout board (red arrows indicate the programming board settings when no external battery is connected to the WildFi tag) und the USB connector to a computer:
 
 ![WildFiTagProgramming](https://github.com/trichl/WildFiOpenSource/blob/main/FlashDownloadTool/WildFiTagProgramming.jpg?raw=true)
 
