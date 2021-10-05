@@ -21,9 +21,15 @@ Open source modular biologger with 2.4 GHz connectivity (BLE, WiFi, ESP NOW). Th
 * Or Eclipse (eclipse-cpp-2020-09-R-win32-x86_64) and idf-eclipse plugin (tutorial: https://github.com/espressif/idf-eclipse-plugin/blob/master/README.md), project stub with complete software architecture integration for Eclipse is located in Software\\WildFiSoftwareArchitecture
 
 # Flashing
-* Using FlashDownloadTool in sub folder
-* Or PlatformIO (automatically executes the following command: C:\\Users\\[username]\\.platformio\\packages\\tool-esptoolpy\\esptool.py --chip esp32 --port "COM99" --baud 460800 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 40m --flash_size detect 0x10000 .pio\\build\\pico32\\firmware.bin)
-* Or using FlashDownloadTool\\esptool\\esptool.py directly (see above for flashing command)
+* After compilation (see above) three binary files are generated
+  * bootloader.bin: the bootloader firmware
+  * partitions.bin: includes the flash partition table for the ESP32
+  * firmware.bin: includes the actual WildFi firmware
+* Software can be flashed via PlatformIO (automatically executes the following command: C:\\Users\\[username]\\.platformio\\packages\\tool-esptoolpy\\esptool.py --chip esp32 --port "COM99" --baud 460800 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 40m --flash_size detect 0x10000 .pio\\build\\pico32\\firmware.bin)
+* Or by using FlashDownloadTool\\esptool\\esptool.py directly (see above for flashing command)
+* Or by using FlashDownloadTool\\flash_download_tool_3.8.5.exe with following settings:
+
+![WildFiTagSettings](https://github.com/trichl/WildFiOpenSource/blob/main/FlashDownloadTool/WildFiTagSettings.png?raw=true)
 
 # ESP-IDF
 * The ESP32 software is based on esp-idf-v4.1, see LICENSE file in Software\\esp-idf-customized
