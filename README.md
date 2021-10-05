@@ -8,6 +8,7 @@ Open source modular biologger with 2.4 GHz connectivity (BLE, WiFi, ESP NOW). Th
 * See sub folder Hardware
 * Designed with Autodesk Eagle 9.5.2
 * PCBs were produced and assembled by PCBWay (production-ready Gerber files and PCBWay settings in Hardware\\GerberProductionFiles)
+* Hardware\\WildFiTagREV6-Extension-Dummy.brd and Hardware\\WildFiTagREV6-Extension-Dummy.sch can be used for designing new extension boards
 
 # IDE (Windows)
 * Visual Studio Code (>= 1.54.3) + PlatformIO (Core >= 5.1.1, Home >= 3.3.4)
