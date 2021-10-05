@@ -1,6 +1,22 @@
 # WildFi biologger
 Open source modular biologger with 2.4 GHz connectivity (BLE, WiFi, ESP NOW). This repository includes hardware design files of the WildFi tag and WildFi extensions, embedded software, software architecture, software for the ESP32 CAM gateways, the Android app, and decoding software.
 
+# Sensors and communication interfaces
+* The WildFi tag integrates an ESP32 Pico D4 and following additional components:
+  * 9-axis IMU (Bosch BMX160)
+  * 4-in-1 environment sensor (Bosch BME680)
+  * Temperature-compensated real time clock (Micro Crystal RV-8803-C7)
+  * Flash memory (Micron MT29F2G01ABAGDWB-IT:G TR)
+  * Energy harvester (STM SPV1050)
+* The WildFi tag has a 16-pin extension port for USB debugging and programming and a 20-pin extension port for attaching more sensors
+* The 20-pin extension port gives access to following communication and control interfaces:
+  * I2C (shared with Bosch BMX160, Bosch BME680 and Micro Crystal RV-8803-C7)
+  * SPI (shared with Micron MT29F2G01ABAGDWB-IT:G TR)
+  * I2S
+  * UART
+  * 3 x GPIOs
+  * 2 x power control lines
+
 # Pinout of the ESP32 Pico D4 and the extension ports
 ![ESP32PinoutV2](https://github.com/trichl/WildFiOpenSource/blob/main/Hardware/ESP32PinoutV2.png?raw=true)
 
