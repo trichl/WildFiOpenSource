@@ -37,15 +37,16 @@ Open source modular biologger with 2.4 GHz connectivity (BLE, WiFi, ESP NOW). Th
 * Or Eclipse (eclipse-cpp-2020-09-R-win32-x86_64) and idf-eclipse plugin (tutorial: https://github.com/espressif/idf-eclipse-plugin/blob/master/README.md), project stub with complete software architecture integration for Eclipse is located in [Software/WildFiSoftwareArchitecture](Software/WildFiSoftwareArchitecture)
 
 # Flashing the Firmware
-* To flash software on the ESP32, the WildFi tag needs to be attached to the [USB breakout board](Hardware/WildFiTagREV6-Extension-USB.sch) (red arrows indicate the programming board settings when no external battery is connected to the WildFi tag) und the USB connector to a computer (flashing is done via the UART bridge that is integrated on the USB breakout board):
-
-![WildFiTagProgramming](https://github.com/trichl/WildFiOpenSource/blob/main/FlashDownloadTool/WildFiTagProgramming.jpg?raw=true)
-
 * After compilation (see above) three binary files are generated
   * bootloader.bin: the bootloader firmware
   * partitions.bin: includes the flash partition table for the ESP32
   * firmware.bin: includes the actual WildFi firmware
-* Software can be flashed via PlatformIO (automatically executes the following command: C:\\Users\\[username]\\.platformio\\packages\\tool-esptoolpy\\esptool.py --chip esp32 --port "COM99" --baud 460800 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 40m --flash_size detect 0x10000 .pio\\build\\pico32\\firmware.bin)
+  * When using PlatformIO the files are automatically generated in [Software\WildFiFirmware\.pio\build\pico32]([Software\WildFiFirmware\.pio\build\pico32)
+* To flash software on the ESP32, the WildFi tag needs to be attached to the [USB breakout board](Hardware/WildFiTagREV6-Extension-USB.sch) (red arrows indicate the programming board settings when no external battery is connected to the WildFi tag) und the USB connector to a computer (flashing is done via the UART bridge that is integrated on the USB breakout board):
+
+![WildFiTagProgramming](https://github.com/trichl/WildFiOpenSource/blob/main/FlashDownloadTool/WildFiTagProgramming.jpg?raw=true)
+
+* Software can be flashed via PlatformIO directly (automatically executes the following command: C:\\Users\\[username]\\.platformio\\packages\\tool-esptoolpy\\esptool.py --chip esp32 --port "COM99" --baud 460800 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 40m --flash_size detect 0x10000 .pio\\build\\pico32\\firmware.bin)
 * Or by using [FlashDownloadTool/esptool/esptool.py](FlashDownloadTool/esptool/esptool.py) directly (see above for flashing command)
 * Or by using [FlashDownloadTool/flash_download_tool_3.8.5.exe](FlashDownloadTool/flash_download_tool_3.8.5.exe) with following settings:
 
