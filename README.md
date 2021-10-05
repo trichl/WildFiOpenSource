@@ -2,7 +2,7 @@
 Open source modular biologger with 2.4 GHz connectivity (BLE, WiFi, ESP NOW). This repository includes hardware design files of the WildFi tag and WildFi extensions, embedded software, software architecture, software for the ESP32 CAM gateways, the Android app, and decoding software.
 
 # Pinout of the ESP32 Pico D4 and the extension ports
-![alt text](https://github.com/trichl/WildFiOpenSource/blob/main/Hardware/ESP32PinoutV2?raw=true)
+![alt text](https://github.com/trichl/WildFiOpenSource/blob/main/Hardware/ESP32PinoutV2.png?raw=true)
 
 # IDE (Windows)
 * Visual Studio Code (>= 1.54.3) + PlatformIO (Core >= 5.1.1, Home >= 3.3.4)
