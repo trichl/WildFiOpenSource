@@ -23,10 +23,10 @@ uint8_t *dmaStreamBuffer;
 #define REST_PAYLOAD_PREFIX_1                   "[{\"tag\":\""
 #define REST_PAYLOAD_PREFIX_2                   "\",\"data\":\""
 
-const char* REST_URL = "https://timmtracker-3489.restdb.io/rest/debug";
+const char* REST_URL = RESTDB_ENDPOINT2;
 const char* REST_CONTENT_TYPE = "application/json";
 const char* REST_ADD_HEADER_KEY = "x-apikey";
-const char* REST_ADD_HEADER_VALUE = "04ef802eae678a82cc9d1e32e0ac48e8a6000";
+const char* REST_ADD_HEADER_VALUE = RESTDB_APIKEY1;
 const char* REST_PAYLOAD_PREFIX = REST_PAYLOAD_PREFIX_1 TAG_NAME REST_PAYLOAD_PREFIX_2;
 const char* REST_PAYLOAD_POSTFIX = "\"}]";
 

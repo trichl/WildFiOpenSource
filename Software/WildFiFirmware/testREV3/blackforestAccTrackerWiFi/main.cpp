@@ -78,10 +78,10 @@ const char* WIFI_PASSWORDS[KNOWN_WIFI_LIST_SIZE] = { "xxxxxxx", "Tracker1" };  /
 const char* START_WIFI_SSID = "LiWoAb New";                                     // wifi name to scan for at beginning -> if found -> connect, get time, stark tracking
 const char* START_WIFI_PASSWORD = "xxxxxx";                                // wifi password for activation/timestamp
 
-const char* REST_URL = "https://timmtracker-3489.restdb.io/rest/debug";
+const char* REST_URL = RESTDB_ENDPOINT2;
 const char* REST_CONTENT_TYPE = "application/json";
 const char* REST_ADD_HEADER_KEY = "x-apikey";
-const char* REST_ADD_HEADER_VALUE = "04ef802eae678a82cc9d1e32e0ac48e8a6000";
+const char* REST_ADD_HEADER_VALUE = RESTDB_APIKEY1;
 #define REST_PAYLOAD_PREFIX_1                           "[{\"tag\":\""
 #define REST_PAYLOAD_PREFIX_2                           "\",\"data\":\""
 const char* REST_PAYLOAD_PREFIX = REST_PAYLOAD_PREFIX_1 TAG_NAME REST_PAYLOAD_PREFIX_2;

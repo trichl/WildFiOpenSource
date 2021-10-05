@@ -80,8 +80,8 @@ class FLASH_MT29 {
 
 		/** FIFO memory functions */
 		uint32_t fifoGetFreeSpace(uint16_t blocksErasedPointer, uint32_t currentPageAddress, uint16_t currentByteOffset, uint32_t fifoSizePages = MT29_NUMBER_PAGES);
-		sequential_write_status_t fifoPushSimple(uint16_t blocksErasedPointer, uint32_t &pageAddressStart, uint16_t &byteOffsetStart, uint8_t *data, uint32_t dataLen, bool readBack, bool debug, uint16_t maxIterations = 20, uint32_t fifoSizePages = MT29_NUMBER_PAGES);
-		sequential_write_status_t fifoPush(uint16_t blocksErasedPointer, uint32_t &pageAddressStart, uint16_t &byteOffsetStart, uint8_t *data1, uint32_t dataLen1, uint8_t *data2, uint32_t dataLen2, uint8_t *data3, uint32_t dataLen3, bool debug = false, uint16_t maxIterations = 20, uint32_t fifoSizePages = MT29_NUMBER_PAGES);
+		sequential_write_status_t fifoPushSimple(uint16_t blocksErasedPointer, uint32_t &pageAddressStart, uint16_t &byteOffsetStart, uint8_t *data, uint32_t dataLen, bool readBack, bool debug, uint16_t maxIterations = 128, uint32_t fifoSizePages = MT29_NUMBER_PAGES);
+		sequential_write_status_t fifoPush(uint16_t blocksErasedPointer, uint32_t &pageAddressStart, uint16_t &byteOffsetStart, uint8_t *data1, uint32_t dataLen1, uint8_t *data2, uint32_t dataLen2, uint8_t *data3, uint32_t dataLen3, bool debug = false, uint16_t maxIterations = 128, uint32_t fifoSizePages = MT29_NUMBER_PAGES);
 		uint16_t fifoGetNumberOfPopableBlocks(uint16_t blocksErasedPointer, uint32_t currentPageAddress, uint32_t fifoSizePages = MT29_NUMBER_PAGES);
 		uint32_t fifoGetNumberOfPopableBytes(uint32_t sendBytePointer, uint32_t writeBytePointer);
 		uint16_t fifoIncrementBlocksErasedPointer(uint16_t blocksErasedPointer, uint32_t fifoSizePages = MT29_NUMBER_PAGES);

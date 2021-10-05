@@ -14,43 +14,39 @@
 #include "soc/soc.h"           // disable brownout problems
 #include "soc/rtc_cntl_reg.h"  // disable brownout problems
 #include "driver/rtc_io.h"
+#include "WifiCredentials.h"
 
 /** ------ SETTINGS ------ */
-
-// TODO: only sniff/participate but don't act as gateway?
-
 // WARNING: changed storage on SDHC: not storing receive timestamp (needs too much additional time)
 
-#define GATEWAY_FOR                                           GATEWAY_FOR_MOVEMENT_LOGGER
-#define RECEVING_FROM_MULTIPLE_TAGS_ENABLED                   false // WARNING: PSRAM might not be sufficient
-#define CHANGE_FILENAME_AFTER_TRANSMISSION                    true
-#define GW_VERSION                                            11
+#define GATEWAY_FOR                                           GATEWAY_FOR_PROXIMITY_DETECTION
+#define GW_VERSION                                            13
 
 String fileExtension                                          = ".bin"; // if STORE_AS_TEXT_FILE = true -> change to .txt
-const char* SSID1                                             = "RodelbahnSoelden";
-const char* PASSWORD1                                         = "xxxxxxxx";
-const char* SSID2                                             = "wildfi";
-const char* PASSWORD2                                         = "wildfi01";
+const char* SSID1                                             = WIFI_SSID1;
+const char* PASSWORD1                                         = WIFI_PASSWORD1;
+const char* SSID2                                             = WIFI_SSID2;
+const char* PASSWORD2                                         = WIFI_PASSWORD2;
+const char* SSID3                                             = WIFI_SSID3;
+const char* PASSWORD3                                         = WIFI_PASSWORD3;
 const char* ntpServer                                         = "pool.ntp.org";
-const String configFilename                                   = "/config.txt";
 
 /** ------ DEFINES & STRUCTS ------ */
 
 #define PIN_LED_RED                                           33
-#define RESTART_WHEN_FILE_TOO_BIG_BYTE                        20000000UL // 20MB
 #define SDHC_MINIMUM_FREE_MBYTES                              256
 #define RX_QUEUE_SIZE                                         15000 // one msg = 245 + 7 = 252 byte -> 15000 * 252 = 3780000 = 3.7MB, sufficient for 4 MByte PSRAM
 #define SDHC_BUFFER_SIZE                                      65536
-
 #define ESP_NOW_FLASH_STREAM_FIRST_BYTE                       0xAB
-
-#define COMMAND_BYTE_FORCE_TRACKING                           0x23
-#define COMMAND_BYTE_ACTIVATE                                 0x33
-#define COMMAND_BYTE_DEACTIVATE                               0x43
 
 /** ------ MESSAGE STRUCTURE FOR MOVEMENT LOGGER ------ */
 
 #if GATEWAY_FOR == GATEWAY_FOR_MOVEMENT_LOGGER
+  #define RECEVING_FROM_MULTIPLE_TAGS_ENABLED                 false // WARNING: PSRAM might not be sufficient, will stop broadcasting when getting DATA messages, up to 5 seconds
+  #define CHANGE_FILENAME_AFTER_TRANSMISSION                  true // WRITING_REST_ON_SDHC_AFTER_MS seconds after receiving last transmission: start a new file
+  #define WRITING_REST_ON_SDHC_AFTER_MS                       10000 // wait for this time until finally writing data on SDHC
+
+  const String configFilename                                 = "/config.txt";
   #define PHY_RATE                                            WIFI_PHY_RATE_18M
   #define LONG_RANGE                                          0
   const String filenameStart                                  = "_MOVE_DATA";
@@ -63,30 +59,97 @@ const String configFilename                                   = "/config.txt";
   #define ESPNOW_META_MSG_GOT_ACTIVATED_LEN                   1           
   #define ESPNOW_META_MSG_GATEWAY_AROUND                      0x66
   #define ESPNOW_META_MSG_GATEWAY_AROUND_LEN                  2
+
+  #define COMMAND_BYTE_FORCE_TRACKING                         0x23
+  #define COMMAND_BYTE_ACTIVATE                               0x33
+  #define COMMAND_BYTE_DEACTIVATE                             0x43
 #endif
 
 /** ------ MESSAGE STRUCTURE FOR PROXIMITY DETECTION ------ */
 
 #if GATEWAY_FOR == GATEWAY_FOR_PROXIMITY_DETECTION
+  #define RECEVING_FROM_MULTIPLE_TAGS_ENABLED                 true // WARNING: PSRAM might not be sufficient, will stop broadcasting when getting DATA messages (which means not effective for proximity detection), up to 5 seconds
+  #define CHANGE_FILENAME_AFTER_TRANSMISSION                  false // WRITING_REST_ON_SDHC_AFTER_MS seconds after receiving last transmission: start a new file
+  #define WRITING_REST_ON_SDHC_AFTER_MS                       1500 // wait for this time until finally writing data on SDHC
+
+  const String configFilename                                 = "/configProx.txt";
   #define PHY_RATE                                            WIFI_PHY_RATE_1M_L
   #define LONG_RANGE                                          0
   const String filenameStart                                  = "_PROX_DATA";
   
   #define GATEWAY_MSG_EVERY_MS                                80
 
-  #define PROXIMITY_OWN_GROUP_0                               0x12
-  #define PROXIMITY_OWN_GROUP_1                               0x34
-  #define PROXIMITY_OWN_GROUP_2                               0x56
-  #define PROXIMITY_OWN_GROUP_3                               0x78
+  #define PROXIMITY_OWN_GROUP_0                               0x12 // still sniffing all proximity data (also of other groups), but tags will not send data and won't store proximity information
+  #define PROXIMITY_OWN_GROUP_1                               0x34 // still sniffing all proximity data (also of other groups), but tags will not send data and won't store proximity information
+  #define PROXIMITY_OWN_GROUP_2                               0x56 // still sniffing all proximity data (also of other groups), but tags will not send data and won't store proximity information
+  #define PROXIMITY_OWN_GROUP_3                               0x78 // still sniffing all proximity data (also of other groups), but tags will not send data and won't store proximity information
   
   #define ALL_MSGS_PAYLOAD_OFFSET_MSG_TYPE_PROXIMITY          0xAA
   #define ALL_MSGS_PAYLOAD_OFFSET_MSG_TYPE_PROXIMITY_LEN      250
   #define ALL_MSGS_PAYLOAD_OFFSET_MSG_TYPE_TAG_AROUND         0xCC
   #define ALL_MSGS_PAYLOAD_OFFSET_MSG_TYPE_TAG_AROUND_LEN     16
   #define ALL_MSGS_PAYLOAD_OFFSET_MSG_TYPE_GATEWAY_AROUND     0xDD
-  #define ALL_MSGS_PAYLOAD_OFFSET_MSG_TYPE_GATEWAY_AROUND_LEN 8
+  #define ALL_MSGS_PAYLOAD_OFFSET_MSG_TYPE_GATEWAY_AROUND_LEN 70
   #define ALL_MSGS_PAYLOAD_OFFSET_MSG_TYPE_GOT_ACTIVATED      0xEE
   #define ALL_MSGS_PAYLOAD_OFFSET_MSG_TYPE_GOT_ACTIVATED_LEN  7
+
+  /** Gateway commands */
+  #define PROXIMITY_COMMAND_NOTHING                       0x00
+  #define PROXIMITY_COMMAND_DO_NOT_SEND                   0x1F
+  #define PROXIMITY_COMMAND_ACTIVATE                      0x2F
+  #define PROXIMITY_COMMAND_DEACTIVATE                    0x3F
+  #define PROXIMITY_COMMAND_CHANGE_CONFIG                 0x4F
+  #define PROXIMITY_COMMAND_FULL_RESET                    0x5F
+
+  typedef struct {
+      bool useLeds;
+      uint8_t trackerMode;
+      uint8_t activationMode;
+      bool getFirstTimeOverWiFi;
+      bool getFirstTimeOverGPS;
+      uint8_t tagIdSource;
+      uint8_t imuMode;
+      uint32_t imuBurstMillis;
+      bool environmentActivated;
+      bool timeCorrectionBetweenTags;
+      uint16_t timeCorrectionDiffMs;
+      bool freeMemoryIfFull;
+      uint8_t accFrequency;
+      uint8_t accAvg;
+      uint8_t accRange;
+      uint8_t magFrequency;
+      uint8_t magAccuracy;
+      uint8_t gyroFrequency;
+      uint8_t gyroRange;
+      uint8_t gyroMode;
+      uint8_t nightTimeEnter;
+      uint8_t nightTimeTurnOnHour;
+      uint8_t nightTimeTurnOnMinute;
+      uint8_t nightTimeTurnOffHour;
+      uint8_t nightTimeTurnOffMinute;
+      uint32_t gpsFixHourBits;
+      bool gpsRandomizeFixes;
+      uint8_t gpsRandomizeFixesPerDay;
+      uint8_t gpsMinHdopTimesTen;
+      uint8_t gpsFirstFixCollectOrbitDataSeconds;
+      bool gpsForcedAfterEveryProximity;
+      uint8_t gpsSyncRTCFrequency;
+      uint8_t proximityFrequencyMinute;
+      uint8_t proximityFrequencyMinuteSeenSomeone;
+      uint16_t proximityListeningIntervalMs;
+      uint8_t proximityDbm;
+      uint8_t proximityDatarate;
+      bool proximityLongRange;
+      uint16_t proximityAirTimeUs;
+      uint16_t activationByGatewayListeningTime;
+      uint16_t activationByGatewaySleepSeconds;
+      uint16_t battMinVoltage;
+      uint16_t battRestartVoltage;
+      uint16_t battMinVoltageDuringTransmission;
+      uint8_t timeWifiOutputPower;
+      uint16_t timeBetweenGetTimeRetriesSeconds;
+  } tag_config_t;
+  tag_config_t configSend = { };
 #endif
 
 typedef struct {
@@ -114,7 +177,7 @@ uint8_t ownMac[6] = { 0 };
 long lastMsgMillis = 0;
 long lastDataMsgMillis = 0;
 File file;
-//File fileMeta;
+File fileMeta;
 bool receiveRunning = false;
 static xQueueHandle rxQueue;
 bool wifiStarted = true;
@@ -129,6 +192,8 @@ uint64_t msgTagAroundCnt = 0;
 uint64_t msgRefusedCnt = 0;
 uint64_t msgProxCnt = 0;
 uint8_t configCommandToSend = 0;
+bool newProximitDataReceived = false;
+uint64_t gatewayMsgs = 0;
 
 uint8_t sdhcBuffer[SDHC_BUFFER_SIZE] = { 0 };
 uint32_t sdhcBufferPointer = 0;
@@ -234,6 +299,11 @@ bool getTimeOverWifi() {
         passwordToConnectTo = PASSWORD2;
         foundWifi = true;
       }
+      else if(WiFi.SSID(i) == SSID3) {
+        ssidToConnectTo = SSID3;
+        passwordToConnectTo = PASSWORD3;
+        foundWifi = true;
+      }
   }
   if(foundWifi) {
     Serial.print("TIME: connect to ");
@@ -285,19 +355,85 @@ void sendGatewayNearMessage() {
     data[0] = ESPNOW_META_MSG_GATEWAY_AROUND;
     data[1] = configCommandToSend;
     if(esp_now_send(broadcastAddress, data, ESPNOW_META_MSG_GATEWAY_AROUND_LEN) != ESP_OK) { printf("SEND ERROR\n"); errorCounter++; }
+    else { gatewayMsgs++; }
   #endif
 
   #if GATEWAY_FOR == GATEWAY_FOR_PROXIMITY_DETECTION 
     uint8_t data[ALL_MSGS_PAYLOAD_OFFSET_MSG_TYPE_GATEWAY_AROUND_LEN] = { 0 }; // all zero
-    data[0] = ALL_MSGS_PAYLOAD_OFFSET_MSG_TYPE_GATEWAY_AROUND;
-    data[1] = PROXIMITY_OWN_GROUP_0;
-    data[2] = PROXIMITY_OWN_GROUP_1;
-    data[3] = PROXIMITY_OWN_GROUP_2;
-    data[4] = PROXIMITY_OWN_GROUP_3;
-    data[5] = ownMac[4];
-    data[6] = ownMac[5];
-    data[7] = configCommandToSend;
+    uint8_t i = 0;
+    data[i] = ALL_MSGS_PAYLOAD_OFFSET_MSG_TYPE_GATEWAY_AROUND; i++;
+    data[i] = PROXIMITY_OWN_GROUP_0; i++;
+    data[i] = PROXIMITY_OWN_GROUP_1; i++;
+    data[i] = PROXIMITY_OWN_GROUP_2; i++;
+    data[i] = PROXIMITY_OWN_GROUP_3; i++;
+    data[i] = ownMac[4]; i++;
+    data[i] = ownMac[5]; i++;
+    data[i] = configCommandToSend; i++;
+
+    data[i] = configSend.useLeds; i++;
+    data[i] = configSend.trackerMode; i++;
+    data[i] = configSend.activationMode; i++;
+    data[i] = configSend.getFirstTimeOverWiFi; i++;
+    data[i] = configSend.getFirstTimeOverGPS; i++;
+    data[i] = configSend.tagIdSource; i++;
+    data[i] = configSend.imuMode; i++;
+    data[i] = configSend.imuBurstMillis >> 24; i++;
+    data[i] = configSend.imuBurstMillis >> 16; i++;
+    data[i] = configSend.imuBurstMillis >> 8; i++;
+    data[i] = configSend.imuBurstMillis; i++;
+    data[i] = configSend.environmentActivated; i++;
+    data[i] = configSend.timeCorrectionBetweenTags; i++;
+    data[i] = configSend.timeCorrectionDiffMs >> 8; i++;
+    data[i] = configSend.timeCorrectionDiffMs & 0xFF; i++;
+    data[i] = configSend.freeMemoryIfFull; i++;
+    data[i] = configSend.accFrequency; i++;
+    data[i] = configSend.accAvg; i++;
+    data[i] = configSend.accRange; i++;
+    data[i] = configSend.magFrequency; i++;
+    data[i] = configSend.magAccuracy; i++;
+    data[i] = configSend.gyroFrequency; i++;
+    data[i] = configSend.gyroRange; i++;
+    data[i] = configSend.gyroMode; i++;
+    data[i] = configSend.nightTimeEnter; i++;
+    data[i] = configSend.nightTimeTurnOnHour; i++;
+    data[i] = configSend.nightTimeTurnOnMinute; i++;
+    data[i] = configSend.nightTimeTurnOffHour; i++;
+    data[i] = configSend.nightTimeTurnOffMinute; i++;
+    data[i] = configSend.gpsFixHourBits >> 24; i++;
+    data[i] = configSend.gpsFixHourBits >> 16; i++;
+    data[i] = configSend.gpsFixHourBits >> 8; i++;
+    data[i] = configSend.gpsFixHourBits; i++;
+    data[i] = configSend.gpsRandomizeFixes; i++;
+    data[i] = configSend.gpsRandomizeFixesPerDay; i++;
+    data[i] = configSend.gpsMinHdopTimesTen; i++;
+    data[i] = configSend.gpsFirstFixCollectOrbitDataSeconds; i++;
+    data[i] = configSend.gpsForcedAfterEveryProximity; i++;
+    data[i] = configSend.gpsSyncRTCFrequency; i++;
+    data[i] = configSend.proximityFrequencyMinute; i++;
+    data[i] = configSend.proximityFrequencyMinuteSeenSomeone; i++;
+    data[i] = configSend.proximityListeningIntervalMs >> 8; i++;
+    data[i] = configSend.proximityListeningIntervalMs & 0xFF; i++;
+    data[i] = configSend.proximityDbm; i++;
+    data[i] = configSend.proximityDatarate; i++;
+    data[i] = configSend.proximityLongRange; i++;
+    data[i] = configSend.proximityAirTimeUs >> 8; i++;
+    data[i] = configSend.proximityAirTimeUs & 0xFF; i++;
+    data[i] = configSend.activationByGatewayListeningTime >> 8; i++;
+    data[i] = configSend.activationByGatewayListeningTime & 0xFF; i++;
+    data[i] = configSend.activationByGatewaySleepSeconds >> 8; i++;
+    data[i] = configSend.activationByGatewaySleepSeconds & 0xFF; i++;
+    data[i] = configSend.battMinVoltage >> 8; i++;
+    data[i] = configSend.battMinVoltage & 0xFF; i++;
+    data[i] = configSend.battRestartVoltage >> 8; i++;
+    data[i] = configSend.battRestartVoltage & 0xFF; i++;
+    data[i] = configSend.battMinVoltageDuringTransmission >> 8; i++;
+    data[i] = configSend.battMinVoltageDuringTransmission & 0xFF; i++;
+    data[i] = configSend.timeWifiOutputPower; i++;
+    data[i] = configSend.timeBetweenGetTimeRetriesSeconds >> 8; i++;
+    data[i] = configSend.timeBetweenGetTimeRetriesSeconds & 0xFF; i++;
+    
     if(esp_now_send(broadcastAddress, data, ALL_MSGS_PAYLOAD_OFFSET_MSG_TYPE_GATEWAY_AROUND_LEN) != ESP_OK) { printf("SEND ERROR\n"); errorCounter++; }
+    else { gatewayMsgs++; }
   #endif
 }
 
@@ -626,7 +762,9 @@ void deleteEmptyFolders() {
   if(file) { file.close(); }
   root.close();
 }
-void sdhcGetConfig() {
+
+#if GATEWAY_FOR == GATEWAY_FOR_MOVEMENT_LOGGER
+bool sdhcGetConfig() {
   String dataLine = "";
   char dataByte;
   fs::FS &fs = SD_MMC;
@@ -634,7 +772,7 @@ void sdhcGetConfig() {
   if(!configFile){
     Serial.println("CONFIG: Failed to open config file, use default CMD = 0x00");
     configCommandToSend = 0;
-    return;
+    return true;
   }
   while(configFile.available()) {
     dataByte = configFile.read();
@@ -656,7 +794,330 @@ void sdhcGetConfig() {
   Serial.print(dataLine);
   Serial.printf(" (%d Byte) -> Resulting Command Byte: ", dataLine.length());
   Serial.printf("0x%02X\n", configCommandToSend);
+  return true;
 }
+#elif GATEWAY_FOR == GATEWAY_FOR_PROXIMITY_DETECTION
+bool sdhcGetConfig() {
+  char line[1024] = { 0 };
+  uint16_t linePointer = 0;
+  char lineByte;
+  uint16_t configLine = 0;
+  fs::FS &fs = SD_MMC;
+  File configFile = fs.open(configFilename);
+  if(!configFile){
+    Serial.println("CONFIG: Failed to open config file, use default CMD = 0x00");
+    configCommandToSend = 0;
+    return true;
+  }
+
+  while(true) {
+    linePointer = 0;
+    memset(line, 0, 1024);
+    while(configFile.available()) {
+      lineByte = configFile.read();
+      if(lineByte == '\n') { break; }
+      else if(lineByte == '\r') { }
+      else if(lineByte == ' ') { }
+      else { line[linePointer] = lineByte; linePointer++; }
+    }
+    if(configLine == 1) {
+      if(strcmp(line,  "PROXIMITY_COMMAND_NOTHING") == 0) { configCommandToSend = PROXIMITY_COMMAND_NOTHING; }
+      else if(strcmp(line, "PROXIMITY_COMMAND_DO_NOT_SEND") == 0) { configCommandToSend = PROXIMITY_COMMAND_DO_NOT_SEND; }
+      else if(strcmp(line, "PROXIMITY_COMMAND_ACTIVATE") == 0) { configCommandToSend = PROXIMITY_COMMAND_ACTIVATE; }
+      else if(strcmp(line, "PROXIMITY_COMMAND_DEACTIVATE") == 0) { configCommandToSend = PROXIMITY_COMMAND_DEACTIVATE; }
+      else if(strcmp(line, "PROXIMITY_COMMAND_CHANGE_CONFIG") == 0) { configCommandToSend = PROXIMITY_COMMAND_CHANGE_CONFIG; }
+      else if(strcmp(line, "PROXIMITY_COMMAND_FULL_RESET") == 0) { configCommandToSend = PROXIMITY_COMMAND_FULL_RESET; }
+      else { Serial.printf("CONFIG: error %s (%d)\n", line, strlen(line)); return false; }
+      Serial.printf("CONFIG: commandByte: 0x%02X (%s)\n", configCommandToSend, line);
+    }
+    else if(configLine == 3) {
+      if(strcmp(line,  "false") == 0) { configSend.useLeds = false; }
+      else if(strcmp(line,  "true") == 0) { configSend.useLeds = true; }
+      else { Serial.printf("CONFIG: error %s\n", line); return false; }
+      Serial.printf("CONFIG: useLeds: %d (%s)\n", configSend.useLeds, line);
+    }
+    else if(configLine == 5) {
+      if(strlen(line) == 0) { Serial.printf("CONFIG: error %s\n", line); return false; }
+      int val = atoi(line);
+      configSend.trackerMode = val;
+      Serial.printf("CONFIG: trackerMode: %d (%s)\n", configSend.trackerMode, line);
+    }
+    else if(configLine == 7) {
+      if(strlen(line) == 0) { Serial.printf("CONFIG: error %s\n", line); return false; }
+      int val = atoi(line);
+      configSend.activationMode = val;
+      Serial.printf("CONFIG: activationMode: %d (%s)\n", configSend.activationMode, line);
+    }
+    else if(configLine == 9) {
+      if(strcmp(line,  "false") == 0) { configSend.getFirstTimeOverWiFi = false; }
+      else if(strcmp(line,  "true") == 0) { configSend.getFirstTimeOverWiFi = true; }
+      else { Serial.printf("CONFIG: error %s\n", line); return false; }
+      Serial.printf("CONFIG: getFirstTimeOverWiFi: %d (%s)\n", configSend.getFirstTimeOverWiFi, line);
+    }
+    else if(configLine == 11) {
+      if(strcmp(line,  "false") == 0) { configSend.getFirstTimeOverGPS = false; }
+      else if(strcmp(line,  "true") == 0) { configSend.getFirstTimeOverGPS = true; }
+      else { Serial.printf("CONFIG: error %s\n", line); return false; }
+      Serial.printf("CONFIG: getFirstTimeOverGPS: %d (%s)\n", configSend.getFirstTimeOverGPS, line);
+    }
+    else if(configLine == 13) {
+      if(strlen(line) == 0) { Serial.printf("CONFIG: error %s\n", line); return false; }
+      int val = atoi(line);
+      configSend.tagIdSource = val;
+      Serial.printf("CONFIG: tagIdSource: %d (%s)\n", configSend.tagIdSource, line);
+    }
+    else if(configLine == 15) {
+      if(strlen(line) == 0) { Serial.printf("CONFIG: error %s\n", line); return false; }
+      int val = atoi(line);
+      configSend.imuMode = val;
+      Serial.printf("CONFIG: imuMode: %d (%s)\n", configSend.imuMode, line);
+    }
+    else if(configLine == 17) {
+      if(strlen(line) == 0) { Serial.printf("CONFIG: error %s\n", line); return false; }
+      int val = atoi(line);
+      configSend.imuBurstMillis = val;
+      Serial.printf("CONFIG: imuBurstMillis: %d (%s)\n", configSend.imuBurstMillis, line);
+    }
+    else if(configLine == 19) {
+      if(strcmp(line,  "false") == 0) { configSend.environmentActivated = false; }
+      else if(strcmp(line,  "true") == 0) { configSend.environmentActivated = true; }
+      else { Serial.printf("CONFIG: error %s\n", line); return false; }
+      Serial.printf("CONFIG: environmentActivated: %d (%s)\n", configSend.environmentActivated, line);
+    }
+    else if(configLine == 21) {
+      if(strcmp(line,  "false") == 0) { configSend.timeCorrectionBetweenTags = false; }
+      else if(strcmp(line,  "true") == 0) { configSend.timeCorrectionBetweenTags = true; }
+      else { Serial.printf("CONFIG: error %s\n", line); return false; }
+      Serial.printf("CONFIG: timeCorrectionBetweenTags: %d (%s)\n", configSend.timeCorrectionBetweenTags, line);
+    }
+    else if(configLine == 23) {
+      if(strlen(line) == 0) { Serial.printf("CONFIG: error %s\n", line); return false; }
+      int val = atoi(line);
+      configSend.timeCorrectionDiffMs = val;
+      Serial.printf("CONFIG: timeCorrectionDiffMs: %d (%s)\n", configSend.timeCorrectionDiffMs, line);
+    }
+    else if(configLine == 25) {
+      if(strcmp(line,  "false") == 0) { configSend.freeMemoryIfFull = false; }
+      else if(strcmp(line,  "true") == 0) { configSend.freeMemoryIfFull = true; }
+      else { Serial.printf("CONFIG: error %s\n", line); return false; }
+      Serial.printf("CONFIG: freeMemoryIfFull: %d (%s)\n", configSend.freeMemoryIfFull, line);
+    }
+    else if(configLine == 27) {
+      if(strlen(line) == 0) { Serial.printf("CONFIG: error %s\n", line); return false; }
+      int val = atoi(line);
+      configSend.accFrequency = val;
+      Serial.printf("CONFIG: accFrequency: %d (%s)\n", configSend.accFrequency, line);
+    }
+    else if(configLine == 29) {
+      if(strlen(line) == 0) { Serial.printf("CONFIG: error %s\n", line); return false; }
+      int val = atoi(line);
+      configSend.accAvg = val;
+      Serial.printf("CONFIG: accAvg: %d (%s)\n", configSend.accAvg, line);
+    }
+    else if(configLine == 31) {
+      if(strlen(line) == 0) { Serial.printf("CONFIG: error %s\n", line); return false; }
+      int val = atoi(line);
+      configSend.accRange = val;
+      Serial.printf("CONFIG: accRange: %d (%s)\n", configSend.accRange, line);
+    }
+    else if(configLine == 33) {
+      if(strlen(line) == 0) { Serial.printf("CONFIG: error %s\n", line); return false; }
+      int val = atoi(line);
+      configSend.magFrequency = val;
+      Serial.printf("CONFIG: magFrequency: %d (%s)\n", configSend.magFrequency, line);
+    }
+    else if(configLine == 35) {
+      if(strlen(line) == 0) { Serial.printf("CONFIG: error %s\n", line); return false; }
+      int val = atoi(line);
+      configSend.magAccuracy = val;
+      Serial.printf("CONFIG: magAccuracy: %d (%s)\n", configSend.magAccuracy, line);
+    }
+    else if(configLine == 37) {
+      if(strlen(line) == 0) { Serial.printf("CONFIG: error %s\n", line); return false; }
+      int val = atoi(line);
+      configSend.gyroFrequency = val;
+      Serial.printf("CONFIG: gyroFrequency: %d (%s)\n", configSend.gyroFrequency, line);
+    }
+    else if(configLine == 39) {
+      if(strlen(line) == 0) { Serial.printf("CONFIG: error %s\n", line); return false; }
+      int val = atoi(line);
+      configSend.gyroRange = val;
+      Serial.printf("CONFIG: gyroRange: %d (%s)\n", configSend.gyroRange, line);
+    }
+    else if(configLine == 41) {
+      if(strlen(line) == 0) { Serial.printf("CONFIG: error %s\n", line); return false; }
+      int val = atoi(line);
+      configSend.gyroMode = val;
+      Serial.printf("CONFIG: gyroMode: %d (%s)\n", configSend.gyroMode, line);
+    }
+    else if(configLine == 43) {
+      if(strlen(line) == 0) { Serial.printf("CONFIG: error %s\n", line); return false; }
+      int val = atoi(line);
+      configSend.nightTimeEnter = val;
+      Serial.printf("CONFIG: nightTimeEnter: %d (%s)\n", configSend.nightTimeEnter, line);
+    }
+    else if(configLine == 45) {
+      if(strlen(line) == 0) { Serial.printf("CONFIG: error %s\n", line); return false; }
+      int val = atoi(line);
+      configSend.nightTimeTurnOnHour = val;
+      Serial.printf("CONFIG: nightTimeTurnOnHour: %d (%s)\n", configSend.nightTimeTurnOnHour, line);
+    }
+    else if(configLine == 47) {
+      if(strlen(line) == 0) { Serial.printf("CONFIG: error %s\n", line); return false; }
+      int val = atoi(line);
+      configSend.nightTimeTurnOnMinute = val;
+      Serial.printf("CONFIG: nightTimeTurnOnMinute: %d (%s)\n", configSend.nightTimeTurnOnMinute, line);
+    }
+    else if(configLine == 49) {
+      if(strlen(line) == 0) { Serial.printf("CONFIG: error %s\n", line); return false; }
+      int val = atoi(line);
+      configSend.nightTimeTurnOffHour = val;
+      Serial.printf("CONFIG: nightTimeTurnOffHour: %d (%s)\n", configSend.nightTimeTurnOffHour, line);
+    }
+    else if(configLine == 51) {
+      if(strlen(line) == 0) { Serial.printf("CONFIG: error %s\n", line); return false; }
+      int val = atoi(line);
+      configSend.nightTimeTurnOffMinute = val;
+      Serial.printf("CONFIG: nightTimeTurnOffMinute: %d (%s)\n", configSend.nightTimeTurnOffMinute, line);
+    }
+    else if(configLine == 53) {
+      if(strlen(line) == 0) { Serial.printf("CONFIG: error %s\n", line); return false; }
+      int val = atoi(line);
+      configSend.gpsFixHourBits = val;
+      Serial.printf("CONFIG: gpsFixHourBits: %d (%s)\n", configSend.gpsFixHourBits, line);
+    }
+    else if(configLine == 55) {
+      if(strcmp(line,  "false") == 0) { configSend.gpsRandomizeFixes = false; }
+      else if(strcmp(line,  "true") == 0) { configSend.gpsRandomizeFixes = true; }
+      else { Serial.printf("CONFIG: error %s\n", line); return false; }
+      Serial.printf("CONFIG: gpsRandomizeFixes: %d (%s)\n", configSend.gpsRandomizeFixes, line);
+    }
+    else if(configLine == 57) {
+      if(strlen(line) == 0) { Serial.printf("CONFIG: error %s\n", line); return false; }
+      int val = atoi(line);
+      configSend.gpsRandomizeFixesPerDay = val;
+      Serial.printf("CONFIG: gpsRandomizeFixesPerDay: %d (%s)\n", configSend.gpsRandomizeFixesPerDay, line);
+    }
+    else if(configLine == 59) {
+      if(strlen(line) == 0) { Serial.printf("CONFIG: error %s\n", line); return false; }
+      int val = atoi(line);
+      configSend.gpsMinHdopTimesTen = val;
+      Serial.printf("CONFIG: gpsMinHdopTimesTen: %d (%s)\n", configSend.gpsMinHdopTimesTen, line);
+    }
+    else if(configLine == 61) {
+      if(strlen(line) == 0) { Serial.printf("CONFIG: error %s\n", line); return false; }
+      int val = atoi(line);
+      configSend.gpsFirstFixCollectOrbitDataSeconds = val;
+      Serial.printf("CONFIG: gpsFirstFixCollectOrbitDataSeconds: %d (%s)\n", configSend.gpsFirstFixCollectOrbitDataSeconds, line);
+    }
+    else if(configLine == 63) {
+      if(strcmp(line,  "false") == 0) { configSend.gpsForcedAfterEveryProximity = false; }
+      else if(strcmp(line,  "true") == 0) { configSend.gpsForcedAfterEveryProximity = true; }
+      else { Serial.printf("CONFIG: error %s\n", line); return false; }
+      Serial.printf("CONFIG: gpsForcedAfterEveryProximity: %d (%s)\n", configSend.gpsForcedAfterEveryProximity, line);
+    }
+    else if(configLine == 65) {
+      if(strlen(line) == 0) { Serial.printf("CONFIG: error %s\n", line); return false; }
+      int val = atoi(line);
+      configSend.gpsSyncRTCFrequency = val;
+      Serial.printf("CONFIG: gpsSyncRTCFrequency: %d (%s)\n", configSend.gpsSyncRTCFrequency, line);
+    }
+    else if(configLine == 67) {
+      if(strlen(line) == 0) { Serial.printf("CONFIG: error %s\n", line); return false; }
+      int val = atoi(line);
+      configSend.proximityFrequencyMinute = val;
+      Serial.printf("CONFIG: proximityFrequencyMinute: %d (%s)\n", configSend.proximityFrequencyMinute, line);
+    }
+    else if(configLine == 69) {
+      if(strlen(line) == 0) { Serial.printf("CONFIG: error %s\n", line); return false; }
+      int val = atoi(line);
+      configSend.proximityFrequencyMinuteSeenSomeone = val;
+      Serial.printf("CONFIG: proximityFrequencyMinuteSeenSomeone: %d (%s)\n", configSend.proximityFrequencyMinuteSeenSomeone, line);
+    }
+    else if(configLine == 71) {
+      if(strlen(line) == 0) { Serial.printf("CONFIG: error %s\n", line); return false; }
+      int val = atoi(line);
+      configSend.proximityListeningIntervalMs = val;
+      Serial.printf("CONFIG: proximityListeningIntervalMs: %d (%s)\n", configSend.proximityListeningIntervalMs, line);
+    }
+    else if(configLine == 73) {
+      if(strlen(line) == 0) { Serial.printf("CONFIG: error %s\n", line); return false; }
+      int val = atoi(line);
+      configSend.proximityDbm = val;
+      Serial.printf("CONFIG: proximityDbm: %d (%s)\n", configSend.proximityDbm, line);
+    }
+    else if(configLine == 75) {
+      if(strlen(line) == 0) { Serial.printf("CONFIG: error %s\n", line); return false; }
+      int val = atoi(line);
+      configSend.proximityDatarate = val;
+      Serial.printf("CONFIG: proximityDatarate: %d (%s)\n", configSend.proximityDatarate, line);
+    }
+    else if(configLine == 77) {
+      if(strcmp(line,  "false") == 0) { configSend.proximityLongRange = false; }
+      else if(strcmp(line,  "true") == 0) { configSend.proximityLongRange = true; }
+      else { Serial.printf("CONFIG: error %s\n", line); return false; }
+      Serial.printf("CONFIG: proximityLongRange: %d (%s)\n", configSend.proximityLongRange, line);
+    }
+    else if(configLine == 79) {
+      if(strlen(line) == 0) { Serial.printf("CONFIG: error %s\n", line); return false; }
+      int val = atoi(line);
+      configSend.proximityAirTimeUs = val;
+      Serial.printf("CONFIG: proximityAirTimeUs: %d (%s)\n", configSend.proximityAirTimeUs, line);
+    }
+    else if(configLine == 81) {
+      if(strlen(line) == 0) { Serial.printf("CONFIG: error %s\n", line); return false; }
+      int val = atoi(line);
+      configSend.activationByGatewayListeningTime = val;
+      Serial.printf("CONFIG: activationByGatewayListeningTime: %d (%s)\n", configSend.activationByGatewayListeningTime, line);
+    }
+    else if(configLine == 83) {
+      if(strlen(line) == 0) { Serial.printf("CONFIG: error %s\n", line); return false; }
+      int val = atoi(line);
+      configSend.activationByGatewaySleepSeconds = val;
+      Serial.printf("CONFIG: activationByGatewaySleepSeconds: %d (%s)\n", configSend.activationByGatewaySleepSeconds, line);
+    }
+    else if(configLine == 85) {
+      if(strlen(line) == 0) { Serial.printf("CONFIG: error %s\n", line); return false; }
+      int val = atoi(line);
+      configSend.battMinVoltage = val;
+      Serial.printf("CONFIG: battMinVoltage: %d (%s)\n", configSend.battMinVoltage, line);
+    }
+    else if(configLine == 87) {
+      if(strlen(line) == 0) { Serial.printf("CONFIG: error %s\n", line); return false; }
+      int val = atoi(line);
+      configSend.battRestartVoltage = val;
+      Serial.printf("CONFIG: battRestartVoltage: %d (%s)\n", configSend.battRestartVoltage, line);
+    }
+    else if(configLine == 89) {
+      if(strlen(line) == 0) { Serial.printf("CONFIG: error %s\n", line); return false; }
+      int val = atoi(line);
+      configSend.battMinVoltageDuringTransmission = val;
+      Serial.printf("CONFIG: battMinVoltageDuringTransmission: %d (%s)\n", configSend.battMinVoltageDuringTransmission, line);
+    }
+    else if(configLine == 91) {
+      if(strlen(line) == 0) { Serial.printf("CONFIG: error %s\n", line); return false; }
+      int val = atoi(line);
+      configSend.timeWifiOutputPower = val;
+      Serial.printf("CONFIG: timeWifiOutputPower: %d (%s)\n", configSend.timeWifiOutputPower, line);
+    }
+    else if(configLine == 93) {
+      if(strlen(line) == 0) { Serial.printf("CONFIG: error %s\n", line); return false; }
+      int val = atoi(line);
+      configSend.timeBetweenGetTimeRetriesSeconds = val;
+      Serial.printf("CONFIG: timeBetweenGetTimeRetriesSeconds: %d (%s)\n", configSend.timeBetweenGetTimeRetriesSeconds, line);
+    }
+    else {
+      //Serial.printf("(CONFIG: %s)\n", line); 
+    }
+
+    configLine++;
+    if(strlen(line) == 0) { break; }
+  }
+  Serial.printf("CONFIG: FINAL COMMAND: 0x%02X\n", configCommandToSend);
+
+  return true;
+}
+#endif
 
 void sdhcGetNextFreeFilenameNumbers() {
   int i = 0;
@@ -728,16 +1189,14 @@ void sdhcClose() {
 
 bool writeRestInBufferOnSDHC() {
   if(sdhcBufferPointer == 0) { return true; }
-  //sdhcOpen(currentFilenameWithExtension);
   int writtenBytes = file.write(sdhcBuffer, sdhcBufferPointer); // receive time in seconds from gateway
   if(writtenBytes == 0) { return false; } // SDHC ejected
-  //sdhcClose();
   Serial.printf("SDHC: wrote rest (%d bytes)\n", sdhcBufferPointer);
   sdhcBufferPointer = 0;
   return true;
 }
 
-bool storeDataOnBuffer(queue_entry_t *queueEntry) { // new function: using buffer
+bool storeDataOnBuffer(queue_entry_t *queueEntry) { // new function: using buffer, faster if writing data as a multiple of 2
   uint32_t dataLenWithMacAndLength = queueEntry->message[6];
   dataLenWithMacAndLength += 7;
 
@@ -752,10 +1211,8 @@ bool storeDataOnBuffer(queue_entry_t *queueEntry) { // new function: using buffe
     uint32_t partTwoLength = dataLenWithMacAndLength - partOneLength;
 
     // write full buffer on SDHC
-    //sdhcOpen(currentFilenameWithExtension);
     int writtenBytes = file.write(sdhcBuffer, SDHC_BUFFER_SIZE); // receive time in seconds from gateway
     if(writtenBytes == 0) { return false; } // SDHC ejected
-    //sdhcClose();
 
     sdhcBufferPointer = 0;
     if(partTwoLength > 0) {
@@ -768,48 +1225,74 @@ bool storeDataOnBuffer(queue_entry_t *queueEntry) { // new function: using buffe
   return true;
 }
 
+void sdhcOpenMeta() {
+  String path = "/" + currentFoldername + "/METADATA.txt";
+  fs::FS &fs = SD_MMC;
+  fileMeta = fs.open(path.c_str(), FILE_APPEND);
+  if(!fileMeta){
+    Serial.println("Failed to open meta file in appending mode");
+  } 
+}
+
+void sdhcCloseMeta() {
+  fileMeta.close();
+}
+
 bool storeMetaData(queue_entry_t *queueEntry) { // new function: using buffer
   //long t = millis();
-  char metaBuffer[1024];
+  const uint16_t META_BUFFER_SIZE = 1024 + 1;
+  char metaBuffer[META_BUFFER_SIZE];
   uint16_t metaBufferPnt = 0;
   const char *hex = "0123456789ABCDEF";
   uint32_t dataLenWithMacAndLength = queueEntry->message[6];
   dataLenWithMacAndLength += 7;
-  String path = "/" + currentFoldername + "/METADATA.txt";
-  fs::FS &fs = SD_MMC;
-  File metaFile = fs.open(path.c_str(), FILE_APPEND);
-  if(!metaFile){
-    Serial.println("Failed to open meta file in appending mode");
-    return false;
-  }
 
   uint32_t recTimeSeconds = (uint32_t) (millis() / 1000);
+  uint32_t recTimeMilliseconds = millis() % 1000UL;
   if(recTimeSeconds > 9999999) { recTimeSeconds = 9999999; }
-  sprintf(metaBuffer, "%07d", recTimeSeconds);
-  metaBuffer[7] = ':';
-  metaBufferPnt += 8;
+  sprintf(metaBuffer, "%07d.%03d", recTimeSeconds, recTimeMilliseconds);
+  metaBufferPnt += (7 + 4);
+  metaBuffer[metaBufferPnt] = ',';
+  metaBufferPnt++;
 
   for(uint16_t i=0; i<dataLenWithMacAndLength; i++) {
-    metaBuffer[metaBufferPnt] = hex[(queueEntry->message[i] >> 4) & 0xF];
-    metaBufferPnt++;
-    metaBuffer[metaBufferPnt] = hex[(queueEntry->message[i]) & 0xF];
-    metaBufferPnt++;
+    if(i == 6) {
+      uint32_t dataLength = queueEntry->message[i];
+      sprintf(metaBuffer + metaBufferPnt, "%03d", queueEntry->message[i]);
+      metaBufferPnt += 3;      
+    }
+    else {
+      metaBuffer[metaBufferPnt] = hex[(queueEntry->message[i] >> 4) & 0xF];
+      metaBufferPnt++;
+      metaBuffer[metaBufferPnt] = hex[(queueEntry->message[i]) & 0xF];
+      metaBufferPnt++;
+    }
+    
+    if(i < 5) {
+      metaBuffer[metaBufferPnt] = ':';
+      metaBufferPnt++;
+    }
     if(i == 5) {
-      metaBuffer[metaBufferPnt] = ' ';
+      metaBuffer[metaBufferPnt] = ',';
       metaBufferPnt++;
     }
     if(i == 6) {
-      metaBuffer[metaBufferPnt] = ' ';
+      metaBuffer[metaBufferPnt] = ',';
       metaBufferPnt++;
     }
+  }
+  for(uint16_t i=metaBufferPnt; i<(META_BUFFER_SIZE-2); i++) {
+    metaBuffer[metaBufferPnt] = '_';
+    metaBufferPnt++;    
   }
   metaBuffer[metaBufferPnt] = '\n';
   metaBufferPnt++;
   metaBuffer[metaBufferPnt] = '\0';
   metaBufferPnt++;
-  int writtenBytes = metaFile.print(metaBuffer);
+  
+  int writtenBytes = fileMeta.print(metaBuffer);
   if(writtenBytes == 0) { return false; } // SDHC ejected
-  metaFile.close();
+  
   //uint32_t timeNeeded = millis() - t;
   //Serial.printf("MAIN: meta stored in %dms\n", timeNeeded);
   return true;
@@ -865,14 +1348,23 @@ void storeRestMessagesAfterError() {
   queue_entry_t queueEntry;
   uint64_t restData = 0;
   uint64_t restMsgs = 0;
-  while(xQueueReceive(rxQueue, &queueEntry, 0) == pdTRUE) { 
-    storeDataOnBuffer(&queueEntry);
+  bool writeSuccess = false;
+  while(xQueueReceive(rxQueue, &queueEntry, 0) == pdTRUE) {
+    if(queueEntry.message[7] == ESP_NOW_FLASH_STREAM_FIRST_BYTE) { // flash stream data
+      writeSuccess = storeDataOnBuffer(&queueEntry);
+    }
+    else { // metadata or proximity data
+      writeSuccess = storeMetaData(&queueEntry);
+    }
     restData += queueEntry.message[6];
     restMsgs++;
     free(queueEntry.message);
   }
   if(!writeRestInBufferOnSDHC()) {
     Serial.println(" -> ERROR storing rest in buffer\n");
+  }
+  if(!writeSuccess) {
+    Serial.println(" -> ERROR writing rest in buffer\n");
   }
   Serial.printf(" -> Stored rest in queue: %llu byte (%llu msgs)\n", restData, restMsgs);
 }
@@ -890,8 +1382,9 @@ void mainTask(void* parameter) {
         if(queueEntry.message[7] == ESP_NOW_FLASH_STREAM_FIRST_BYTE) { // flash stream data
           writeSuccess = storeDataOnBuffer(&queueEntry);
         }
-        else { // metadata
+        else { // metadata or proximity data
           writeSuccess = storeMetaData(&queueEntry);
+          newProximitDataReceived = true;
         }
         totalAmountReceivedData += queueEntry.message[6];
         free(queueEntry.message);
@@ -916,6 +1409,7 @@ void mainTask(void* parameter) {
             Serial.println("MAIN: SEVERE ERROR - PSRAM low -> storing rest of msgs then - RESTARTING");
             storeRestMessagesAfterError();
             sdhcClose();
+            sdhcCloseMeta();
             restart();
           }
         }
@@ -927,6 +1421,7 @@ void mainTask(void* parameter) {
           Serial.println("MAIN: SEVERE ERROR - queue failure - RESTARTING");
           storeRestMessagesAfterError();
           sdhcClose();
+          sdhcCloseMeta();
           restart();
         }
       }
@@ -938,7 +1433,7 @@ void mainTask(void* parameter) {
     delay(5); // otherwise watchdog sometimes triggers, 1ms possible because 1000Hz RTOS
 
     currentMillis = millis();
-    if((sdhcBufferPointer > 0) && ((currentMillis - lastMsgMillis) > 10000)) { // no active transmission: then store rest of data in buffer on SDHC
+    if((sdhcBufferPointer > 0) && ((currentMillis - lastMsgMillis) > WRITING_REST_ON_SDHC_AFTER_MS)) { // no active transmission: then store rest of data in buffer on SDHC
       long t = millis();
       if(!writeRestInBufferOnSDHC()) {
         errorWithQueue = true;
@@ -969,7 +1464,16 @@ void mainTask(void* parameter) {
         }
         Serial.println("SDHC: write to file: /" + currentFoldername + "/" + currentFilename + fileExtension);
       }
-      sdhcOpen("/" + currentFoldername + "/" + currentFilename + fileExtension); // open again 
+      sdhcOpen("/" + currentFoldername + "/" + currentFilename + fileExtension); // open again
+    }
+
+    if((newProximitDataReceived) && ((currentMillis - lastMsgMillis) > WRITING_REST_ON_SDHC_AFTER_MS)) { // no active transmission: then commit meta data to SDHC (calling close), otherwise not stored on SDHC
+      newProximitDataReceived = false;
+      long t = millis();
+      sdhcCloseMeta(); // also close meta file
+      sdhcOpenMeta(); // open again
+      uint32_t timeNeeded = millis() - t;
+      Serial.printf("MAIN: committed meta data in %dms\n", timeNeeded);
     }
 
     // previously gateway messages sent here
@@ -1038,7 +1542,7 @@ void setup() {
   if(fs.mkdir("/" + currentFoldername)){ Serial.println("INIT: created dir: " + currentFoldername); }
   else {
     Serial.println("INIT: failed to create dir: " + currentFoldername);
-   errorState();
+    errorState();
   }
 
   // create file name (AFTER SDHC init)
@@ -1064,7 +1568,10 @@ void setup() {
   //Serial.printf("INIT: 2 free heap: %d\n",ESP.getFreeHeap());
 
   // get configuration
-  sdhcGetConfig();
+  if(!sdhcGetConfig()) {
+    Serial.println("INIT: config file not OK!");
+    errorState();    
+  }
   
   // check PSRAM
   Serial.printf("INIT: total PSRAM: %d, free PSRAM: %d, queue entry size: %d\n", ESP.getPsramSize(), ESP.getFreePsram(), sizeof(queue_entry_t));
@@ -1087,6 +1594,7 @@ void setup() {
 
   // NEW: open file already
   sdhcOpen("/" + currentFoldername + "/" + currentFilename + fileExtension);
+  sdhcOpenMeta();
 
   // start listening
   Serial.printf("INIT: all done, START LISTENING (broadcast every %d ms)\n", GATEWAY_MSG_EVERY_MS);
@@ -1099,7 +1607,7 @@ void setup() {
       lastMillisPrintStatus = millis();
       getLocalTime(&timeinfo);
       #if GATEWAY_FOR == GATEWAY_FOR_MOVEMENT_LOGGER 
-        Serial.printf("MOV %02d:%02d:%02d: Cmd: 0x%02X, Messages (new: %d): Data: %llu, Activation: %llu, TagAround: %llu, Refused: %llu | Bytes stored: %llu, Heap: %d, Psram: %d, SDHC: %llu, Buffer: %d, ErrorCnt: %d, LastMsg: %ds\n",
+        Serial.printf("MOV %02d:%02d:%02d: Cmd: 0x%02X, Messages (new: %d): Data: %llu, Activation: %llu, TagAround: %llu, Refused: %llu | Bytes stored: %llu, Heap: %d, Psram: %d, SDHC: %llu, Buffer: %d, ErrorCnt: %d, LastMsg: %ds, gwMsgs: %llu\n",
           timeinfo.tm_hour,
           timeinfo.tm_min,
           timeinfo.tm_sec,
@@ -1115,10 +1623,13 @@ void setup() {
           sdhcFreeBytes - totalAmountReceivedData,
           sdhcBufferPointer,
           errorCounter,
-          ((uint32_t)(currentTime - lastMsgMillis)) / 1000);
+          ((uint32_t)(currentTime - lastMsgMillis)) / 1000,
+          gatewayMsgs);
       #endif
       #if GATEWAY_FOR == GATEWAY_FOR_PROXIMITY_DETECTION 
-        Serial.printf("PROX %02d:%02d:%02d: Cmd: 0x%02X, Messages (new: %d): Data: %llu, Activation: %llu, TagAround: %llu, Proximity: %llu, Refused: %llu | Bytes stored: %llu, Heap: %d, Psram: %d, SDHC: %llu, Buffer: %d, ErrorCnt: %d, LastMsg: %ds\n",
+        Serial.printf("ID %02X%02X, PROX %02d:%02d:%02d: Cmd: 0x%02X, Messages (new: %d): Data: %llu, Activation: %llu, TagAround: %llu, Proximity: %llu, Refused: %llu | Bytes stored: %llu, Heap: %d, Psram: %d, SDHC: %llu, Buffer: %d, ErrorCnt: %d, LastMsg: %ds, gwMsgs: %llu\n",
+          ownMac[4],
+          ownMac[5],
           timeinfo.tm_hour,
           timeinfo.tm_min,
           timeinfo.tm_sec,
@@ -1135,7 +1646,8 @@ void setup() {
           sdhcFreeBytes - totalAmountReceivedData,
           sdhcBufferPointer,
           errorCounter,
-          ((uint32_t)(currentTime - lastMsgMillis)) / 1000);
+          ((uint32_t)(currentTime - lastMsgMillis)) / 1000,
+          gatewayMsgs);
       #endif
         
       newDataCounter = 0;

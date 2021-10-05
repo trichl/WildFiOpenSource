@@ -79,6 +79,12 @@
 // Software I2C
 #include "esp_pm.h"
 
+// Random generator
+#include "bootloader_random.h"
+
+// WiFi credentials
+#include "WifiCredentials.h"
+
 class WildFiTagREV6; // forward declaration for post_task_stream_flash_parameters_t
 
 /** PIN definitions (equals to GPIOxy) */
@@ -117,6 +123,7 @@ class WildFiTagREV6; // forward declaration for post_task_stream_flash_parameter
 #define ESP32_SERIAL_BAUD_RATE			115200
 
 /** Data NVS */
+#define NVS_DEFAULT_PARTITION			"nvs"
 #define NVS_DATA_PARTITION				"nvs2"
 
 /** Blinky blink */
@@ -343,7 +350,7 @@ void RTC_IRAM_ATTR esp_wake_deep_sleep(void); 							// 10ms without serial outp
 /** UART 2 */
 #define UART2_PORT_NUMBER   				UART_NUM_1
 #define UART2_RX_BUFFER 					2048
-#define UART2_EVENT_QUEUE_SIZE 				20
+#define UART2_EVENT_QUEUE_SIZE 				100
 
 /** Magnetometer calibration */
 struct mag_calibration_t {
@@ -360,7 +367,7 @@ class WildFiTagREV6 {
 		/** Basic functions */
 		WildFiTagREV6();
 		~WildFiTagREV6();
-		bool selfTest(uint16_t voltageSupplied, uint32_t testBits);
+		bool selfTest(uint16_t voltageSupplied, uint32_t testBits, uint16_t startDelaySeconds = 10);
 		void initPins();							// takes 1ms
 		// menuconfig: RELATED to WAKEUP TIME:
 			// CONFIG_ESP32_DEEP_SLEEP_WAKEUP_DELAY = 500 (default 2000)
@@ -380,10 +387,12 @@ class WildFiTagREV6 {
 
 		/** Wake-up from deep sleep */
 		void enableInternalTimerInterruptInDeepSleep(uint32_t seconds); // measured: 3.92h in deep sleep = 123s drift (too short), according to internet: drift should be around 1 minute per day
+		void ultraShortDeepSleep();					// basically restarting system
 		void enableRTCInterruptInDeepSleep();		// using EXT0 (because pull-up supported), call before calling deepSleep()	
 		void enableWakeUpPinInDeepSleep();			// using EXT1, only ALL pins LOW or one pin HIGH, call before calling deepSleep()
 		void enableAccInterruptInDeepSleep();		// using EXT1 -> ACC or Wakeup pin wake up, both together not possible
 		void enableUart2InterruptInLightSleep();
+		void disableAccInterruptInDeepSleep();
 		wake_up_reason_t getWakeUpReason();
 
 		/** Wake-stub */
@@ -402,14 +411,15 @@ class WildFiTagREV6 {
 		void ledRedOff();
 		void ledGreenOn();
 		void ledGreenOff();
+		void blinkGreenRedAlternating(uint8_t howOften);
 		void blinkTimes(uint8_t howOften, blink_t color, bool addDelayAtEnd = false);
 		void blink(blink_t l1, blink_t l2 = B_NONE, blink_t l3 = B_NONE);
 
-		/** Internal NVS memory (NEW: using partition "nvs2" instead of "nvs" to reduce initDataNVS time!) */
-		bool initNVS();											// WARNING: takes 157ms (@10MHz) and 16ms-87ms (@80MHz), used for WiFi and BLE, using partition "nvs"
+		/** Second NVS memory (NEW: using partition "nvs2" instead of "nvs" to reduce initDataNVS time!) */
 		bool initDataNVS();										// 9ms @80MHz, less pages = faster initialization but more wear levelling
 		bool resetDataNVS();									// full erase
 		void printDataNVSStats();
+		uint32_t nvsGetBlobSize(const char *key);
 		uint32_t nvsReadUINT32(const char *key);				// 1ms
 		uint16_t nvsReadUINT16(const char *key);				// 1ms
 		uint8_t nvsReadUINT8(const char *key);					// 1ms
@@ -419,6 +429,16 @@ class WildFiTagREV6 {
 		bool nvsWriteUINT32x2(const char *key1, uint32_t val1, const char *key2, uint32_t val2);
 		bool nvsWriteUINT32andUINT16(const char *key1, uint32_t val1, const char *key2, uint16_t val2);
 		uint32_t nvsReadThenPlusOneUINT32(const char *key);
+
+		/** First (default) NVS partition */
+		bool initNVS();											// WARNING: takes 157ms (@10MHz) and 16ms-87ms (@80MHz), used for WiFi and BLE, using partition "nvs"
+		bool resetNVS();									// full erase
+		uint32_t defaultNvsReadUINT32(const char *key, bool *neverWritten);
+		uint16_t defaultNvsReadUINT16(const char *key, bool *neverWritten);
+		uint8_t defaultNvsReadUINT8(const char *key, bool *neverWritten);
+		bool defaultNvsWriteUINT32(const char *key, uint32_t val);
+		bool defaultNvsWriteUINT16(const char *key, uint16_t val);
+		bool defaultNvsWriteUINT8(const char *key, uint8_t val);		
 
 		/** Internal SPIFFS memory */
 		bool initSpiffs(uint8_t maxFiles);
@@ -436,6 +456,13 @@ class WildFiTagREV6 {
 		/** GPIO B */
 		void gpioBOn();
 		void gpioBOff();
+
+		/** UART 1 (USB) */
+		bool serialMenue(bool blinkRed, const char *nvsOwnIdString, const char *nvsActivationString, void (*gpsFunction)(void));
+		bool waitOnChar(char c, uint16_t timeoutSeconds);
+		char waitOnAnyChar(uint16_t timeoutSeconds);
+		uint32_t waitOnNumberInput(uint16_t timeoutSeconds);
+		bool waitOnStringInput(char *buffer, uint8_t bufferLen, uint16_t timeoutSeconds);
 
 		/** UART 2 (TXD2, RXD2) */
 		QueueHandle_t* uart2GetQueue();
@@ -486,6 +513,7 @@ class WildFiTagREV6 {
 		bool connectToWiFiDirectly(const char* ssid, const char* password, int8_t maxTxPower, uint8_t channel = WIFI_ALL_14_CHANNELS); // 119ms, needs initWiFi to be called before
 		wifi_connect_status_t connectedToWiFi(); // for polling, Korntal needs 836/840/1336ms/3338ms until connected (callback called) / 1515-2012ms if connectToWiFiAfterScan is used, 2052-2224ms if WiFi AP not there -> if stored in NVS only 780ms
 		void disconnectAndStopWiFi(); // 9ms
+		esp_ip4_addr_t getWiFiIP();
 
 		/** REST Webservices */
 		wifi_post_data_status_t getWiFiPOSTCallStatus(); // WORST CASE: 18 seconds (connected to WiFi, but no Internet)

@@ -39,7 +39,7 @@ double PlatformAttitudeEstimator::GiToMeterPerSecondSquare(double in) {
 	return in * 9.80664999999998;
 }
 
-bool PlatformAttitudeEstimator::feed(uint8_t *fifoData, uint16_t fifoLen, uint16_t imuFrequency, uint8_t accelRange, uint8_t gyroRange, bool setMagnetometerValuesToZero, int16_t magHardIronOffsetX, int16_t magHardIronOffsetY, int16_t magHardIronOffsetZ) {
+bool PlatformAttitudeEstimator::feed(uint8_t *fifoData, uint16_t fifoLen, uint16_t imuFrequency, uint8_t accelRange, uint8_t gyroRange, bool setMagnetometerValuesToZero, int16_t magHardIronOffsetX, int16_t magHardIronOffsetY, int16_t magHardIronOffsetZ, bool resetAll, uint8_t debugLevel) {
     bmx160_fifo_dataset_len_t datasetLen = BMX160_FIFO_DATASET_LEN_ACC_AND_MAG_AND_GYRO;
 	uint16_t iterator = 0;
 	int16_t accX = 0, accY = 0, accZ = 0, magXComp = 0, magYComp = 0, magZComp = 0, gyroX = 0, gyroY = 0, gyroZ = 0;
@@ -50,6 +50,9 @@ bool PlatformAttitudeEstimator::feed(uint8_t *fifoData, uint16_t fifoLen, uint16
     timeDiff = 1. / timeDiff;
 	if(fifoLen < datasetLen) { return false; }
     if(fifoLen % datasetLen != 0) { return false; }
+    if(resetAll) {
+        est.resetAll(true); // full reset of the estimator before calculating anything
+    }
 	while(true) {
 		if(iterator + datasetLen > fifoLen) { break; }
 
@@ -80,7 +83,7 @@ bool PlatformAttitudeEstimator::feed(uint8_t *fifoData, uint16_t fifoLen, uint16
         fMagY = magYComp;
         fMagZ = magZComp;
 
-        printf("%d MAG uT: %.1f %.1f %.1f\n", datasetCounter, fMagX, fMagY, fMagZ);
+        if(debugLevel >= 2) { printf("%d MAG uT: %.1f %.1f %.1f\n", datasetCounter, fMagX, fMagY, fMagZ); }
 
         // important data translation for library
         fAccX = GiToMeterPerSecondSquare(fAccX);
@@ -106,9 +109,13 @@ bool PlatformAttitudeEstimator::feed(uint8_t *fifoData, uint16_t fifoLen, uint16
         est.getAttitude(q);
         //printf("My attitude is (quaternion): %f, %f, %f\n", q[0], q[1], q[2], q[3]);
         //printf("My attitude is (ZYX Euler rad): y %f, p %f, r %f\n", est.eulerYaw(), est.eulerPitch(), est.eulerRoll());
-        printf("%d ZYX Euler deg: y %.2f°, p %.2f°, r %.2f°\n", datasetCounter, radToDeg(est.eulerYaw()), radToDeg(est.eulerPitch()), radToDeg(est.eulerRoll()));
+        if(debugLevel >= 2) { printf("%d ZYX Euler deg: y %.2f°, p %.2f°, r %.2f°\n", datasetCounter, radToDeg(est.eulerYaw()), radToDeg(est.eulerPitch()), radToDeg(est.eulerRoll())); }
         datasetCounter++;
 	}
+
+    double quickLearningStatus = est.getLambda(); // between 0 and 1 (0 = learning, 1 = fully learned)
+
+    if(debugLevel >= 1) { printf("Final: ZYX Euler deg: y %.2f°, p %.2f°, r %.2f° (QL: %.2f)\n", radToDeg(est.eulerYaw()), radToDeg(est.eulerPitch()), radToDeg(est.eulerRoll()), quickLearningStatus); }
 
 
     return true;

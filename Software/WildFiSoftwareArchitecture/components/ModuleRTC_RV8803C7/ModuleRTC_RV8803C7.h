@@ -63,7 +63,8 @@ class RTC_RV8803C7 {
 		RTC_RV8803C7();
 		bool timeIsValidNoUndervoltage(bool &error);
 		bool set(uint8_t hours, uint8_t minutes, uint8_t seconds, uint8_t weekday, uint8_t date, uint8_t month, uint16_t year);
-		uint32_t getTimestamp(bool &error);
+		uint32_t getTimestampInternal(bool &error);
+		bool getTimestamp(uint32_t *timestamp, uint8_t *hundreds);
 		uint8_t getSeconds(bool &error);
 		uint8_t getMinutes(bool &error);
 		uint8_t getHours(bool &error);
@@ -71,11 +72,13 @@ class RTC_RV8803C7 {
 		uint8_t getMonth(bool &error);
 		uint16_t getYear(bool &error);
 		uint8_t get100thOfSeconds(bool &error);
+		bool setSeconds(uint8_t seconds);
 
 		// interrupt on every full minute
 		bool setTimeUpdateInterruptMinuteChange(); // UIE, UF, USEL -> on every minute change, use set function for time setting before
 		bool disableTimeUpdateInterruptMinuteChange(); // UIE, UF, USEL
 		bool reenableTimeUpdateInterruptMinuteChange(); 
+		bool timeUpdateInterruptMinuteChangeHappened(bool &error);
 
 		// interrupt every 1 .. 4096 seconds
 		bool setRegularInterrupt(uint16_t seconds); // TIE, TF, TE -> pin goes low for 7.813ms, first period has time uncertainty of 15.625ms (1Hz timer)

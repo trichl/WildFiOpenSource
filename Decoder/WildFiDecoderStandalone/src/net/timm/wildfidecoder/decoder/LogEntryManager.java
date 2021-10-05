@@ -17,6 +17,8 @@ public class LogEntryManager {
         logEntryTypes.add(new LogEntryAccMagGyroREV6());
         logEntryTypes.add(new LogEntry1HzGPSAccMagGyroREV6());
         logEntryTypes.add(new LogEntryAccREV6());
+        logEntryTypes.add(new LogEntryProximityAccEnv());
+        logEntryTypes.add(new LogEntryProximityAccMagGyroEnv());
     }
 
     public LogEntry createEntry(String line, String dataMessageCustomPrefix) {
@@ -108,7 +110,7 @@ public class LogEntryManager {
             if (debug) Log.d("decoder-plausibility", "fifoLen not plausible " + fifoLen);
             return false;
         }
-        if (fifoLen > 1024) {
+        if (fifoLen > (1024 * 8)) {
             if (debug) Log.d("decoder-plausibility", "fifoLen not plausible " + fifoLen);
             return false;
         }

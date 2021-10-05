@@ -22,9 +22,10 @@ uint32_t GPS_L70_REV6::estimateUARTSendTimeMs(uint32_t messageLength) {
     if((delay - ((uint32_t) (delay))) < 0.5) { return ((uint32_t) delay); } // floor
     return (((int) (delay)) + 1); // ceil
 }
-
+/*
 bool GPS_L70_REV6::getTimeOnly(esp_gps_t *gpsData, uint32_t timeoutSeconds, WildFiTagREV6 *device, bool blinkRedLed, bool debug) {
     // L70 stages: first time in GPGGA, then a bit later date in GPRMC (GOT TIMESTAMP then), then fix
+    // TODO: merge changes from tryToGetFixNew!
     const uint8_t RUBBISH_MINIMUM_LENGTH_NMEA = 10; // 17
     uint16_t addExtraDelay = 0;
     uint8_t nmeaMessageCounter = 0;
@@ -150,7 +151,7 @@ bool GPS_L70_REV6::getTimeOnly(esp_gps_t *gpsData, uint32_t timeoutSeconds, Wild
                                     gpsData->parent.utcTimestamp += 1;
                                 }
 
-                                /*if(debug) { 
+                                if(debug) { 
                                     // calculate difference to current time
                                     bool error = false;
                                     uint32_t oldTimestamp = device->rtc.getTimestamp(error);
@@ -168,7 +169,7 @@ bool GPS_L70_REV6::getTimeOnly(esp_gps_t *gpsData, uint32_t timeoutSeconds, Wild
                                     timestampNowMs *= 1000;
                                     int64_t timestampDiffMs = timestampNowMs - timestampBeforeMs;
                                     printf("getTimeOnly: %lld -> %lld, diff: %lld\n", timestampBeforeMs, timestampNowMs, timestampDiffMs);  
-                                }*/
+                                }
 
                                 if(!device->rtc.set(timeStruct.Hour, timeStruct.Minute, timeStruct.Second, timeStruct.Wday, timeStruct.Day, timeStruct.Month, timeStruct.Year)) {
                                     if(blinkRedLed) { device->ledRedOff(); }
@@ -200,22 +201,122 @@ bool GPS_L70_REV6::getTimeOnly(esp_gps_t *gpsData, uint32_t timeoutSeconds, Wild
     free(uart2Data);
     if(blinkRedLed) { device->ledRedOff(); }
     return false;
+}*/
+
+get_uart_result_t GPS_L70_REV6::afterLightSleepWaitForGPRMCandGPGGA(esp_gps_t *gpsData, bool *hasValidTimestamp, uint16_t *uartMillisWait, bool debug) {
+    uart_event_t event;
+    uint16_t uart2DataPointer = 0;
+    size_t bufferedSize;
+    get_uart_result_t result = GPS_UART_RESULT_SUCESS;
+    *uartMillisWait = 0;
+    if(queueHandle == NULL) { return GPS_UART_RESULT_INIT_ERROR; }
+    uint8_t *uart2Data = (uint8_t*) malloc(UART2_RX_BUFFER);
+    if(uart2Data == NULL) { return GPS_UART_RESULT_INIT_ERROR; }
+    bzero(uart2Data, UART2_RX_BUFFER); // write all zeros into buffer
+    //uint8_t uart2Data[UART2_RX_BUFFER] = { 0 }; // leads to stack overflow!
+    
+    // just woke up by any character from light sleep, stay in loop until sufficient UART messages were received
+    uint64_t timeWaited = Timing::millis();
+    while(true) {
+        if(!xQueueReceive(*queueHandle, (void * )&event, (50 / portTICK_PERIOD_MS))) { // triggered when not received a char character for 50ms
+            // will be entered in FLP mode because UART sentence needs 700ms to fully arrive -> only solvable by setting (600 / portTICK_PERIOD_MS)
+            result = GPS_UART_RESULT_TIMEOUT;
+            break;
+        }
+        else { // reading out any event (event.type) (line break or data event (char received))
+            bufferedSize = 0;
+            uart_get_buffered_data_len(UART2_PORT_NUMBER, &bufferedSize); // get length of message in UART buffer
+            if(bufferedSize > 0) {
+                if(uart2DataPointer + bufferedSize < (UART2_RX_BUFFER - 1)) { // only add data if buffer size okay
+                    int readLen = uart_read_bytes(UART2_PORT_NUMBER, uart2Data + uart2DataPointer, bufferedSize, 100 / portTICK_PERIOD_MS);
+                    if(readLen > 0) {
+                        uart2DataPointer += readLen;
+                        for(uint16_t a = 0; a < uart2DataPointer; a++) {
+                            if(uart2Data[a] == '\0') { uart2Data[a] = 'x'; } // make sure that rubbish at start does not include string termination
+                        }
+                        if(uart2Data[uart2DataPointer-1] == '\n') { // last symbol is line break
+                            // check if strings '$GPRMC' and '$GPGGA' are in message
+                            char *s;
+                            s = strstr((char *) uart2Data, "$GPGGA");
+                            if(s != NULL) {
+                                s = strstr((char *) uart2Data, "$GPRMC");
+                                if(s != NULL) {
+                                    break; // we are done here! received full uart messages
+                                }
+                            }
+                        }
+                    }
+                }
+                else {
+                    free(uart2Data);
+                    return GPS_UART_RESULT_BUFF_OVERFLOW_ERROR; // should not happen!
+                }
+            }
+        }
+    }
+    // evaluate result from UART
+    //uart2Data[uart2DataPointer] = '\0'; // make sure the line is a standard string
+    timeWaited = Timing::millis() - timeWaited;
+    *uartMillisWait = (uint16_t) timeWaited;
+
+    char *uart2DataChar = (char *) uart2Data;
+    if(debug) {
+        /*for(uint16_t a = 0; a < uart2DataPointer; a++) {
+            if(uart2Data[a] == '\n') {  uart2Data[a] = 'n'; }
+            if(uart2Data[a] == '\r') {  uart2Data[a] = 'r'; }
+        }*/
+        printf("gpsUart: (%dms|%d.%03d|%s|%d)\n", (uint32_t) timeWaited, ((uint32_t) Timing::millis()) / 1000, ((uint32_t) Timing::millis()) % 1000, uart2DataChar, strlen(uart2DataChar));
+    }
+
+    // extract complete $GP messages
+    bool foundRealStart = false;
+    char *validPart = strchr(uart2DataChar, '$'); // substring: first start of $
+    while(!foundRealStart) {
+        if(validPart == NULL) { break; } // no more '$' in string
+        else {
+            if(strlen(validPart) < 5) { break; } // should be an error
+            else {
+                if(strncmp("$GP", validPart, 3) == 0) { foundRealStart = true; break; } // first time that after $ comes valid GPS message -> stop
+                else { validPart = strchr(validPart + 1, '$'); } // + 1 because pointing on next char value
+            }
+        }
+    }
+    if((validPart != NULL) && foundRealStart) {
+        uint16_t numberFullNMEAs = 0;
+        char *temp = validPart;
+        for(numberFullNMEAs=0; temp[numberFullNMEAs]; temp[numberFullNMEAs]=='$' ? numberFullNMEAs++ : *temp++);
+        if(numberFullNMEAs != 2) {
+            result = GPS_UART_RESULT_ORDER_INCORRECT;
+        }
+        if(strncmp("$GPRMC", validPart, 6) != 0) { // first message (after ZDA) should be GPRMC
+            result = GPS_UART_RESULT_ORDER_INCORRECT;
+        }
+        //if(debug) { printf("gpsUart: valid: %s", validPart); }  // WARNING: CREATES TIME DELAY WHEN SYNCHRONIZING RTC
+        if(gpsDecodeLine(gpsData, validPart, strlen(validPart)) != GPS_DECODE_RESULT_SUCESS) {
+            result = GPS_UART_RESULT_DECODE_ERROR; // might overwrite GPS_UART_RESULT_ORDER_INCORRECT
+        }
+    }
+    else {
+        result = GPS_UART_RESULT_NOT_VALID_ERROR; // no $ in result
+    }
+    // check if valid time received
+    *hasValidTimestamp = updateUTCTimestamp(gpsData); // returns true if time could be set (means timestamp is valid)
+
+    free(uart2Data);       
+    return result;
 }
 
 get_fix_result_t GPS_L70_REV6::tryToGetFix(esp_gps_t *gpsData, gps_get_fix_config_t *config, WildFiTagREV6 *device) {
-    // UNTESTED
-    // WARNING: >900ms wait time might fuck up receiving order?!? -> add separate delay??
     // L70 stages: first time in GPGGA, then a bit later date in GPRMC (GOT TIMESTAMP then), then fix
-    const uint8_t RUBBISH_MINIMUM_LENGTH_NMEA = 10;
-    uint16_t addExtraDelay = 0;
     bool gotTimeAfterFix = false;
     bool gotFix = false;
     bool updatedRTC = false;
     bool couldUpdateTime = false;
-    uint8_t nmeaMessageCounter = 0;
     int64_t ttffStartUs = 0;
     int64_t ttffWaitAfterFixUs = 0;
     const int64_t ttffWaitAfterFixLimitUs = config->afterFixMaxWaitOnHDOP * 1000ULL * 1000ULL;
+    uint16_t uartMillisWait = 0;
+    get_uart_result_t res = GPS_UART_RESULT_SUCESS;
 
     if(!isStarted()) { return GPS_FIX_RESULT_NOT_ANSWERING; }
     ttffStartUs = esp_timer_get_time(); // start timer
@@ -229,19 +330,12 @@ get_fix_result_t GPS_L70_REV6::tryToGetFix(esp_gps_t *gpsData, gps_get_fix_confi
 		if(esp_timer_create(&validTimeArgs, &validTimeTimer) != ESP_OK) { return GPS_FIX_TIMER_FAIL; }
 	}
 
-    uint8_t *uart2Data = (uint8_t*) malloc(UART2_RX_BUFFER);
-    if(uart2Data == NULL) { return GPS_FIX_MALLOC_FAIL; }
-
     device->enableUart2InterruptInLightSleep();
     esp_sleep_enable_timer_wakeup(15000000UL); // 15 seconds security for light sleep in case GPS is not answering (disconnected)
     device->lightSleep();
 
     while(!gotFix) {
-        //uart_flush(UART2_PORT_NUMBER); // WHY?
-        nmeaMessageCounter = 0;
-        uart_event_t event;
-        size_t bufferedSize;
-
+        // WOKEN UP HERE FROM LIGHT SLEEP
         // turn on LED
         if(config->blinkLeds) {
             if(couldUpdateTime) { device->ledGreenOn(); } // or gpsData->parent.fix > 0
@@ -251,7 +345,6 @@ get_fix_result_t GPS_L70_REV6::tryToGetFix(esp_gps_t *gpsData, gps_get_fix_confi
         // check if wakeup due to timeout
         esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);
         if(esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER) {
-            free(uart2Data);
             if(config->debug) { printf("tryToGetFix: fatal GPS not responding!\n"); }
             if(config->blinkLeds) { device->ledGreenOff(); device->ledRedOff(); }
             return GPS_FIX_NO_ANSWER_FATAL;
@@ -260,141 +353,121 @@ get_fix_result_t GPS_L70_REV6::tryToGetFix(esp_gps_t *gpsData, gps_get_fix_confi
         // check timeout
         int64_t ttffTemp = (esp_timer_get_time() - ttffStartUs) / 1000000ULL;
         uint32_t ttffCompareSeconds = (uint32_t) ttffTemp;
-        if(ttffCompareSeconds >= config->timeoutSeconds) {
-            free(uart2Data);
+        if((ttffCompareSeconds >= config->timeoutSeconds)
+            || (((ttffCompareSeconds > config->timeoutNotEvenTimeSeconds) && (gpsData->parent.date.year == 80) && (gpsData->parent.tim.hour == 0) && (gpsData->parent.tim.minute < ((config->timeoutNotEvenTimeSeconds / 60) + 1))))) {
             if(config->debug) { printf("tryToGetFix: timeout!\n"); }
             if(config->blinkLeds) { device->ledGreenOff(); device->ledRedOff(); }
             return GPS_FIX_TIMEOUT;
         }
 
-        while(true) {
-            if(xQueueReceive(*(device->uart2GetQueue()), (void * )&event, 0)) {
-                if(event.type == UART_PATTERN_DET) { // '\n' detected
-                    nmeaMessageCounter++;
-                    uart_get_buffered_data_len(UART2_PORT_NUMBER, &bufferedSize); // get length of message in UART buffer
-                    if((nmeaMessageCounter == 1) && (bufferedSize < RUBBISH_MINIMUM_LENGTH_NMEA)) { nmeaMessageCounter--; } // maybe \n in first 20 bytes of rubbish detected (happened) -> do not count as NMEA message
+        // wait until all uart messages are received (either stops after getting '\n' and having GPRMC and GPGGA or after 50ms when not receiving an event anymore)
+        res = afterLightSleepWaitForGPRMCandGPGGA(gpsData, &couldUpdateTime, &uartMillisWait, config->debug); // no debug
+        if((res == GPS_UART_RESULT_INIT_ERROR) || (res == GPS_UART_RESULT_BUFF_OVERFLOW_ERROR)) {
+            uart_flush(UART2_PORT_NUMBER); return GPS_FIX_MALLOC_FAIL; // fatal errors, stop here
+        }
+        if(res != GPS_UART_RESULT_SUCESS) { // other errors: GPS_UART_RESULT_TIMEOUT (do not stop), GPS_UART_RESULT_DECODE_ERROR (do not stop), GPS_UART_RESULT_ORDER_INCORRECT (do not stop), GPS_UART_RESULT_NOT_VALID_ERROR (do not stop)
+            if(config->debug) { printf("tryToGetFix: uart error %d\n", (uint8_t) res); } // only print
+        }
 
-                    if(nmeaMessageCounter >= 3) {
-                        bzero(uart2Data, UART2_RX_BUFFER); // write all zeros into buffer
-                        // uart_get_buffered_data_len(UART2_PORT_NUMBER, &bufferedSize);
-                        int readLen = uart_read_bytes(UART2_PORT_NUMBER, uart2Data, bufferedSize, 100 / portTICK_PERIOD_MS); // pos + 1 to also read the pattern itself (\n)
-                        if(readLen > 0) { // string looks like this: "???????,,,,0.00,0.00,050180,,,N*4C\r\n$GPGGA,000225.800,,,,,0,0,,,M,,M,,*45\r\n" -> ~20 characters lost at start (@115200)
-                            uart2Data[readLen] = '\0'; // make sure the line is a standard string
-                            for(uint16_t a = 0; a < readLen; a++) {
-                                if(uart2Data[a] == '\0') { uart2Data[a] = 'X'; } // make sure that rubbish at start does not include string termination
-                            }
-                            char *uart2DataChar = (char *) uart2Data;
-                            
-                            // extract complete $GP messages
-                            bool foundRealStart = false;
-                            char *validPart = strchr(uart2DataChar, '$'); // substring: first start of $
-                            while(!foundRealStart) {
-                                if(validPart == NULL) { break; } // no more '$' in string
-                                else {
-                                    if(strlen(validPart) < 5) { break; } // should be an error
-                                    else {
-                                        if(strncmp("$GP", validPart, 3) == 0) { foundRealStart = true; break; } // first time that after $ comes valid GPS message -> stop
-                                        else { validPart = strchr(validPart + 1, '$'); } // + 1 because pointing on next char value
-                                    }
-                                }
-                            }
-                            if(validPart != NULL) {
-                                if(foundRealStart) {
-                                    uint16_t numberFullNMEAs = 0;
-                                    char *temp = validPart;
-                                    for(numberFullNMEAs=0; temp[numberFullNMEAs]; temp[numberFullNMEAs]=='$' ? numberFullNMEAs++ : *temp++);
-                                    if(numberFullNMEAs != 2) {
-                                        if(config->debug) { printf("tryToGetFix: WARNING: received %d msgs!\n", numberFullNMEAs); } // WARNING: CREATES TIME DELAY WHEN SYNCHRONIZING RTC
-                                    }
-                                    if(strncmp("$GPRMC", validPart, 6) != 0) { // first message (after ZDA) should be GPRMC
-                                        if(config->debug) { printf("tryToGetFix: WARNING: rmc not first msg -> wait 500ms!\n"); } // WARNING: CREATES TIME DELAY WHEN SYNCHRONIZING RTC
-                                        addExtraDelay = 500;
-                                    }
-                                    //if(config->debug) { printf("tryToGetFix: valid: %s", validPart); }  // WARNING: CREATES TIME DELAY WHEN SYNCHRONIZING RTC
-                                    if(gpsDecodeLine(gpsData, validPart, readLen + 1) != GPS_DECODE_RESULT_SUCESS) {
-                                        if(config->debug) { printf("tryToGetFix: decode line error\n"); } // WARNING: CREATES TIME DELAY WHEN SYNCHRONIZING RTC
-                                    }
-                                }
-                            }
+        // only for debugging, but quite helpful (showing millis of RTC in comparison to GPS)
+        bool error = false;
+        uint16_t tempRTCMillis = 0;
+        if(config->setRTCTime) { 
+            if(config->debug) { tempRTCMillis = ((uint16_t) device->rtc.get100thOfSeconds(error)) * 10; }
+        }
 
-                            // calculate timestamp
-                            couldUpdateTime = updateUTCTimestamp(gpsData); // returns true if time could be set (means timestamp is valid)
-
-                            // check if got a valid time for the first time
-                            if(couldUpdateTime && (!gotTimeAfterFix) && (gpsData->parent.fix > 0)) { // first time getting a valid GPS time! (only executed once) -> ONLY AFTER GETTING A FIX
-                                gotTimeAfterFix = true;
-                                if(config->setRTCTime) { // ASSUMING I2C HAS BEEN STARTED! update RTC time
-                                    // --- BE QUICK HERE ---
-                                    // delay from UART: (max. 2 * 80 Byte*(8+2) * (1 / 115200 = 0.00868ms/bit) = 13.88ms)
-                                    validTimeTimerFinished = false;
-
-                                    // if debugging: get current milliseconds to compare
-                                    uint8_t seconds100thOld = 0;
-                                    uint16_t millisecondsOld = 0;
-                                    if(config->debug) { 
-                                        bool error = false;
-                                        seconds100thOld = device->rtc.get100thOfSeconds(error);
-                                        millisecondsOld = seconds100thOld * 10;
-                                    }
-
-                                    // start timer
-                                    uint32_t waitTimeUs = gpsData->parent.tim.thousand;
-                                    // TODO: add estimateUARTSendTimeMs
-                                    waitTimeUs = (1000 - waitTimeUs) * 1000;
-                                    if(waitTimeUs == 0) { waitTimeUs = 1; } // should not happen, but just in case
-
-                                    tmElements_t timeStruct;
-                                    if(waitTimeUs == 1000000) { // 1 full second to wait (milliseconds of GPS = 0) -> don't wait
-                                        breakTime(gpsData->parent.utcTimestamp, timeStruct); // use THIS second
-                                        waitTimeUs = 0;
-                                    }
-                                    else {
-                                        if(esp_timer_start_once(validTimeTimer, waitTimeUs) != ESP_OK) {
-                                            if(config->blinkLeds) { device->ledGreenOff(); device->ledRedOff(); }
-                                            uart_flush(UART2_PORT_NUMBER); free(uart2Data); return GPS_FIX_TIMER_FAIL;
-                                        }
-                                        while(!validTimeTimerFinished) { ; } // busy waiting until full second
-                                        breakTime(gpsData->parent.utcTimestamp + 1, timeStruct);
-                                    }
-
-                                    if(!device->rtc.set(timeStruct.Hour, timeStruct.Minute, timeStruct.Second, timeStruct.Wday, timeStruct.Day, timeStruct.Month, timeStruct.Year)) {
-                                        if(config->blinkLeds) { device->ledGreenOff(); device->ledRedOff(); }
-                                        uart_flush(UART2_PORT_NUMBER); free(uart2Data); return GPS_FIX_RTC_CONFIG_FAIL;
-                                    }
-
-                                    updatedRTC = true;
-                                    if(config->debug) {
-                                        printf("tryToGetFix: RTC milli compare before sync: %u -> %u\n", millisecondsOld, gpsData->parent.tim.thousand);
-                                        printf("tryToGetFix: updated RTC to: %d:%d:%d (wait: %u ms)\n", timeStruct.Hour, timeStruct.Minute, timeStruct.Second, (waitTimeUs/1000));
-                                    }
-                                }
-                                if(config->debug) { printf("tryToGetFix: ---- GOT 1ST VALID TIME: %u.%u ----\n", gpsData->parent.utcTimestamp, gpsData->parent.tim.thousand); }
-                            }
-
-                            // check if we shall stop
-                            if(config->debug) { printf("tryToGetFix: %llds: %d.%d.%d %d:%d:%d.%03u, LAT: %f, LON: %f, SATS: %d, HDOP: %.2f, FIX: %d\n", (esp_timer_get_time()-ttffStartUs)/1000000ULL, gpsData->parent.date.day, gpsData->parent.date.month, gpsData->parent.date.year, gpsData->parent.tim.hour, gpsData->parent.tim.minute, gpsData->parent.tim.second, gpsData->parent.tim.thousand, gpsData->parent.latitude, gpsData->parent.longitude, gpsData->parent.sats_in_use, gpsData->parent.dop_h, gpsData->parent.fix); }
-                            if(gpsData->parent.fix > 0) { // valid gps fix?
-                                if(ttffWaitAfterFixUs == 0) {
-                                    if(config->debug) { printf("tryToGetFix: ---- FIX AFTER %lld SECONDS, BUT WAIT ----\n", (esp_timer_get_time()-ttffStartUs)/1000000ULL); }
-                                    ttffWaitAfterFixUs = esp_timer_get_time(); // first time got fix - remember time
-                                }
-                                // wait maximum x seconds or until HDOP is already good enough
-                                if((gpsData->parent.dop_h < config->minHDOP) || ((esp_timer_get_time() - ttffWaitAfterFixUs) > ttffWaitAfterFixLimitUs)) {
-                                    if(config->debug) { printf("tryToGetFix: ---- FIX AFTER %lld SECONDS ----\n", (esp_timer_get_time()-ttffStartUs)/1000000ULL); }
-                                    gpsData->parent.ttfMilliseconds = (uint32_t) ((esp_timer_get_time() - ttffStartUs) / 1000ULL);
-                                    gotFix = true;
-                                }
-                            }
-                            //if(config->debug) { printf("\n"); }
-                            //if(config->debug) { device->delay(20); } // for printf to finish before light sleep
-                        }
-                        break; // go into light sleep
+        // check if we shall stop
+        if(gpsData->parent.fix > 0) { // valid gps fix?
+            if(ttffWaitAfterFixUs == 0) {
+                //if(config->debug) { printf("tryToGetFix: ---- FIX AFTER %lld SECONDS, CHECK HDOP ----\n", (esp_timer_get_time()-ttffStartUs)/1000000ULL); }
+                ttffWaitAfterFixUs = esp_timer_get_time(); // first time got fix - remember time
+            }
+            // wait maximum x seconds or until HDOP is already good enough
+            if((gpsData->parent.dop_h < config->minHDOP) || ((esp_timer_get_time() - ttffWaitAfterFixUs) > ttffWaitAfterFixLimitUs)) {
+                //if(config->debug) { printf("tryToGetFix: ---- HDOP OK, FIX AFTER %lld SECONDS ----\n", (esp_timer_get_time()-ttffStartUs)/1000000ULL); }
+                if(config->waitAfterFixUntilZeroMs) { // wait until GPS sends messages at exactly .000 (eventually waiting until timeout)
+                    if(gpsData->parent.tim.thousand == 0) {
+                        gpsData->parent.ttfMilliseconds = (uint32_t) ((esp_timer_get_time() - ttffStartUs) / 1000ULL);
+                        gotFix = true;
                     }
                 }
-            }        
+                else { // do not wait until GPS sends messages at exactly .000
+                    gpsData->parent.ttfMilliseconds = (uint32_t) ((esp_timer_get_time() - ttffStartUs) / 1000ULL);
+                    gotFix = true;
+                }
+            }
         }
+
+        // check if RTC shall be set
+        if(gotFix && (!gotTimeAfterFix)) { // only true when having a fix + hdop ok or hdop wait time over!!
+            gotTimeAfterFix = true;
+            if(config->setRTCTime) { // ASSUMING I2C HAS BEEN STARTED! update RTC time
+                // --- BE QUICK HERE ---
+                // delay from UART: (max. 2 * 80 Byte*(8+2) * (1 / 115200 = 0.00868ms/bit) = 13.88ms) -> JAP, corresponds to measurements
+                validTimeTimerFinished = false;
+
+                // if debugging: get current milliseconds to compare
+                uint8_t seconds100thOld = 0;
+                uint16_t millisecondsOld = 0;
+                uint32_t timestampOld = 0;
+                uint32_t waitTimeUs = 0;
+                tmElements_t timeStruct;
+                bool refused = false;
+                if(config->debug) {
+                    device->rtc.getTimestamp(&timestampOld, &seconds100thOld);
+                    millisecondsOld = seconds100thOld * 10;
+                }
+
+                // compare both times
+                int64_t timestampMsOld = timestampOld;
+                timestampMsOld = (timestampMsOld * 1000) + millisecondsOld;
+                int64_t timestampMsNow = gpsData->parent.utcTimestamp;
+                timestampMsNow = (timestampMsNow * 1000) + gpsData->parent.tim.thousand;
+                int64_t timestampDiffMs = timestampMsOld - timestampMsNow;
+
+                if((timestampDiffMs > 20) || (timestampDiffMs < -20)) {
+                    // start timer
+                    waitTimeUs = gpsData->parent.tim.thousand;
+                    // TODO: add estimateUARTSendTimeMs
+                    waitTimeUs = (1000 - waitTimeUs) * 1000;
+                    if(waitTimeUs == 0) { waitTimeUs = 1; } // should not happen, but just in case
+
+                    if(waitTimeUs == 1000000) { // 1 full second to wait (milliseconds of GPS = 0) -> don't wait
+                        breakTime(gpsData->parent.utcTimestamp, timeStruct); // use THIS second
+                        waitTimeUs = 0;
+                    }
+                    else {
+                        if(esp_timer_start_once(validTimeTimer, waitTimeUs) != ESP_OK) {
+                            if(config->blinkLeds) { device->ledGreenOff(); device->ledRedOff(); }
+                            uart_flush(UART2_PORT_NUMBER); return GPS_FIX_TIMER_FAIL;
+                        }
+                        while(!validTimeTimerFinished) { ; } // busy waiting until full second
+                        breakTime(gpsData->parent.utcTimestamp + 1, timeStruct);
+                    }
+
+                    if(!device->rtc.set(timeStruct.Hour, timeStruct.Minute, timeStruct.Second, timeStruct.Wday, timeStruct.Day, timeStruct.Month, timeStruct.Year)) {
+                        if(config->blinkLeds) { device->ledGreenOff(); device->ledRedOff(); }
+                        uart_flush(UART2_PORT_NUMBER); return GPS_FIX_RTC_CONFIG_FAIL;
+                    }
+                }
+                else {
+                    if(config->debug) { printf("tryToGetFix: RTC update: REFUSED (diff <= 20ms)\n"); }
+                    refused = true;
+                }
+
+                updatedRTC = true;
+                if(config->debug) {
+                    printf("tryToGetFix: RTC update: time diff %lldms, %lld -> %lld (HDOP %.2f, UART: %dms)\n", timestampDiffMs, timestampMsOld, timestampMsNow, gpsData->parent.dop_h, uartMillisWait);
+                    if(!refused) { printf("tryToGetFix: RTC update: %d:%d:%d (wait: %u ms)\n", timeStruct.Hour, timeStruct.Minute, timeStruct.Second, (waitTimeUs/1000)); }
+                }
+            }
+        }
+
+        // print result
+        if(config->debug) { printf("%lld tryToGetFix: %llds: %d.%d.%d %d:%d:%d.%03u(%03u), LAT: %f, LON: %f, SATS: %d, HDOP: %.2f (REF: %.2f), F: %d\n", esp_timer_get_time()/1000UL, (esp_timer_get_time()-ttffStartUs)/1000000ULL, gpsData->parent.date.day, gpsData->parent.date.month, gpsData->parent.date.year, gpsData->parent.tim.hour, gpsData->parent.tim.minute, gpsData->parent.tim.second, gpsData->parent.tim.thousand, tempRTCMillis, gpsData->parent.latitude, gpsData->parent.longitude, gpsData->parent.sats_in_use, gpsData->parent.dop_h, config->minHDOP, gpsData->parent.fix); }
+
+        // check if we shall enter light sleep again
         if(!gotFix) {
-            if(addExtraDelay > 0) { device->delay(addExtraDelay); addExtraDelay = 0; } // in case of unsynced GPS messages
             uart_flush(UART2_PORT_NUMBER);
             if(config->blinkLeds) { device->ledGreenOff(); device->ledRedOff(); }
             device->enableUart2InterruptInLightSleep();
@@ -403,7 +476,6 @@ get_fix_result_t GPS_L70_REV6::tryToGetFix(esp_gps_t *gpsData, gps_get_fix_confi
         }
     }
     uart_flush(UART2_PORT_NUMBER);
-    free(uart2Data);
     if(config->blinkLeds) { device->ledGreenOff(); device->ledRedOff(); }
     if(updatedRTC) { return GPS_FIX_SUCCESS_AND_RTC_UPDATED; }
     return GPS_FIX_SUCCESS_NO_RTC_UPDATE;
@@ -497,7 +569,7 @@ bool GPS_L70_REV6::setFLPMode(bool permanently) {
     return true;
 }
 
-bool GPS_L70_REV6::setFLPMode2() {
+bool GPS_L70_REV6::setFLPModeOnce() {
 	const char* command = "$PMTK262,1*29\r\n";
     uart_write_bytes(UART2_PORT_NUMBER, command, strlen(command));
     if(!waitForAnswer("$PMTK001,262,3,1*2B\r\n", 2000)) { return false; }
@@ -933,4 +1005,40 @@ bool GPS_L70_REV6::gpsDecodeCorruptedGPRMCLine(esp_gps_t *esp_gps, const char* m
 		return true;
 	}
 	return false;	
+}
+
+void GPS_L70_REV6::checkAliveAndMaybeChangeBaudrate(WildFiTagREV6 *device, bool debug) {
+    device->shortLightSleep(100);
+    device->gpioBOn();   
+    device->uart2Init(115200);
+    init(device->uart2GetQueue());
+    device->uart2EnablePatternInterrupt('\n');
+    if(isStarted()) {
+        if(debug) { printf("gpsCheckAliveAndMaybeChangeBaudrate: GPS working on 115200\n"); }
+    }
+    else {
+        device->gpioBOff();
+        if(debug) { printf("gpsCheckAliveAndMaybeChangeBaudrate: GPS not answering on 115200 -> TRYING 9600\n"); }
+        device->shortLightSleep(500);
+        device->uart2UpdateBaudrate(9600);
+        device->gpioBOn(); // turn on again
+        if(isStarted()) {
+            if(debug) { printf("gpsCheckAliveAndMaybeChangeBaudrate: GPS answering on 9600 -> CHANGE\n"); }
+            permanentlySetBaudrate115200(); // waiting 2 seconds here
+            device->gpioBOff();
+            device->delay(2000);
+            device->uart2UpdateBaudrate(115200);
+            device->gpioBOn(); // turn on again
+            if(isStarted()) {
+                if(debug) { printf("gpsCheckAliveAndMaybeChangeBaudrate: change success, talking on 115200 now\n"); }
+            }
+            else {
+                if(debug) { printf("gpsCheckAliveAndMaybeChangeBaudrate: FATAL, change did not work\n"); }
+            }
+        }
+        else {
+            if(debug) { printf("gpsCheckAliveAndMaybeChangeBaudrate: NOT ANSWERING ON 9600 OR 115200 -> NOT CONNECTED?\n"); }
+        }
+    }
+    device->gpioBOff();
 }

@@ -21,6 +21,7 @@ static TaskHandle_t RTOStaskHandle = NULL;
 static bool wiFiScanRunning = false;	// needed for callback function, in order to call esp_wifi_connect or not
 static bool wiFiScanDone = false;
 static wifi_connect_status_t wiFiConnected = WIFI_CONNECT_NEVER_STARTED;
+static esp_ip4_addr_t wiFiIP;
 static void eventHandlerWiFi(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data);
 
 // NTP
@@ -72,22 +73,23 @@ WildFiTagREV6::WildFiTagREV6() {
 
 WildFiTagREV6::~WildFiTagREV6() { }
 
-bool WildFiTagREV6::selfTest(uint16_t voltageSupplied, uint32_t testBits) {
+bool WildFiTagREV6::selfTest(uint16_t voltageSupplied, uint32_t testBits, uint16_t startDelaySeconds) {
 	bool isAlive = false;
 	bool error = false;
-	const uint16_t startDelay = 10;
 	esp_task_wdt_init(120, false); // disable watchdog
 
 	uint8_t myMac[6] = { 0 };
 	esp_efuse_mac_get_default(myMac);
-	printf("Selftest: MAC: %02X:%02X:%02X:%02X:%02X:%02X\n", myMac[0], myMac[1], myMac[2], myMac[3], myMac[4], myMac[5]);
+	printf("%d Selftest: MAC: %02X:%02X:%02X:%02X:%02X:%02X\n", ((uint32_t) Timing::millis()), myMac[0], myMac[1], myMac[2], myMac[3], myMac[4], myMac[5]);
 
-	printf("Selftest: starting in %d seconds..\n", startDelay);
+	printf("%d Selftest: starting in %d seconds..\n", ((uint32_t) Timing::millis()), startDelaySeconds);
 	delay(100); // finish printf
-	shortLightSleep(startDelay * 1000);
+	if(startDelaySeconds > 0) {
+		shortLightSleep(startDelaySeconds * 1000);
+	}
 
 	/** Voltage measurement */
-	printf("Selftest: 01: voltage measurement..");
+	printf("%d Selftest: 01: voltage measurement..", ((uint32_t) Timing::millis()));
 	if((testBits & SELFTEST_VOLTAGE) == 0) { printf("..SKIPPED\n"); }
 	else {
 		uint16_t voltageMeasured = readSupplyVoltage();
@@ -98,14 +100,14 @@ bool WildFiTagREV6::selfTest(uint16_t voltageSupplied, uint32_t testBits) {
 		}
 		else {
 			voltageOffset = voltageSupplied - voltageMeasured;
-			printf("..too low by %dmV, %dmV)..", voltageOffset, voltageMeasured);		
+			printf("..(too low by %dmV, %dmV)..", voltageOffset, voltageMeasured);		
 		}
 		if(voltageOffset >= 100) { printf("..FAILED (off too much)\n"); return false; }
 		printf("..OKAY\n");
 	}
 
 	/** LEDs */
-	printf("Selftest: 02: LEDs (green, red, both), please check..");
+	printf("%d Selftest: 02: LEDs (green, red, both), please check..", ((uint32_t) Timing::millis()));
 	if((testBits & SELFTEST_LEDS) == 0) { printf("..SKIPPED\n"); }
 	else {
 		delay(1000);
@@ -122,11 +124,11 @@ bool WildFiTagREV6::selfTest(uint16_t voltageSupplied, uint32_t testBits) {
 	}
 
 	/** Hall sensor */
-	printf("Selftest: 03: hall sensor measurement..");
+	printf("%d Selftest: 03: hall sensor measurement..", ((uint32_t) Timing::millis()));
 	if((testBits & SELFTEST_HALLSENSOR) == 0) { printf("..SKIPPED\n"); }
 	else {
 		int32_t hallValue = readHallSensor(1);
-		if((hallValue) >= 80 || (hallValue <= -50)) { printf("..FAILED (out of bounds: %d)\n", hallValue); return false; }
+		if((hallValue) >= 80 || (hallValue <= -80)) { printf("..FAILED (out of bounds: %d)\n", hallValue); return false; }
 		printf("..(%d)..OKAY\n", hallValue);
 	}
 
@@ -139,7 +141,7 @@ bool WildFiTagREV6::selfTest(uint16_t voltageSupplied, uint32_t testBits) {
 	}
 
 	/** I2C Ping */
-	printf("Selftest: 04: I2C bus..");
+	printf("%d Selftest: 04: I2C bus..", ((uint32_t) Timing::millis()));
 	if((testBits & SELFTEST_I2C) == 0) { printf("..SKIPPED\n"); }
 	else {
 		isAlive = false;
@@ -155,22 +157,22 @@ bool WildFiTagREV6::selfTest(uint16_t voltageSupplied, uint32_t testBits) {
 	}
 
 	/** RTC */
-	printf("Selftest: 05: RTC set/get time..");
+	printf("%d Selftest: 05: RTC set/get time..", ((uint32_t) Timing::millis()));
 	if((testBits & SELFTEST_RTC) == 0) { printf("..SKIPPED\n"); }
 	else {
 		uint32_t expectedTimestamp = 1615213937;
 		if(!rtc.set(14, 32, 17, 6, 8, 3, 2021)) { printf("..FAILED (set)\n"); sensorPowerOff(); return false; }
-		uint32_t timestamp = rtc.getTimestamp(error);
-		if(error) { printf("..FAILED (get)\n"); return false; }
+		uint32_t timestamp = 0;
+		if(!rtc.getTimestamp(&timestamp, NULL)) { printf("..FAILED (get)\n"); return false; }
 		if(timestamp != expectedTimestamp) { printf("..FAILED (%d not equal %d)\n", timestamp, expectedTimestamp); sensorPowerOff(); return false; }
 		delay(1200);
-		timestamp = rtc.getTimestamp(error);
+		if(!rtc.getTimestamp(&timestamp, NULL)) { printf("..FAILED (get)\n"); return false; }
 		if(timestamp != expectedTimestamp + 1) { printf("..FAILED (not +1)\n"); sensorPowerOff(); return false; }
 		printf("..OKAY\n");
 	}
 
 	/** Acc and Gyro calibration */
-	printf("Selftest: 06: ACC and GYRO FOC calibration done?..");
+	printf("%d Selftest: 06: ACC and GYRO FOC calibration done?..", ((uint32_t) Timing::millis()));
 	if((testBits & SELFTEST_ACC_GYRO_FOC_CHECK) == 0) { printf("..SKIPPED\n"); }
 	else {
 		acc_config_t accConfigForFOC = { BMX160_ACCEL_ODR_25HZ, BMX160_ACCEL_BW_RES_AVG8, BMX160_ACCEL_RANGE_2G };
@@ -202,7 +204,7 @@ bool WildFiTagREV6::selfTest(uint16_t voltageSupplied, uint32_t testBits) {
 	}
 
 	/** Baro get temperature */
-	printf("Selftest: 07: Baro get temperature..");
+	printf("%d Selftest: 07: Baro get temperature..", ((uint32_t) Timing::millis()));
 	if((testBits & SELFTEST_BARO) == 0) { printf("..SKIPPED\n"); }
 	else {
 		if(!baro.init(BME680_OS_8X, BME680_OS_2X, BME680_OS_4X, BME680_FILTER_SIZE_3, 0, 0)) { printf("..FAILED (init)\n"); sensorPowerOff(); return false; }
@@ -210,24 +212,24 @@ bool WildFiTagREV6::selfTest(uint16_t voltageSupplied, uint32_t testBits) {
 		if(!baro.getResults()) { printf("..FAILED (get results)\n"); sensorPowerOff(); return false;  }
 		int16_t temperature = baro.getTemperature(error);
 		if(error) { printf("..FAILED (get temperature)\n"); sensorPowerOff(); return false;  }
-		if((temperature < 1000) || (temperature > 3500)) { printf("..FAILED (temperature strange: %d)\n", temperature); sensorPowerOff(); return false;  }
+		if((temperature < 1000) || (temperature > 4500)) { printf("..FAILED (temperature strange: %d)\n", temperature); sensorPowerOff(); return false;  }
 		printf("..OKAY %d degree (/100)\n", temperature);
 	}
 
 	/** SENSOR POWER OFF */
 	if((testBits & SELFTEST_I2C) || (testBits & SELFTEST_RTC) || (testBits & SELFTEST_ACC_GYRO_FOC_CHECK) || (testBits & SELFTEST_BARO)) { // I2C related tests
-		printf("Selftest: - sensor power off -\n");
+		printf("%d Selftest: - sensor power off -\n", ((uint32_t) Timing::millis()));
 		sensorPowerOff(); // WARNING: keep on in case of adding BME680 data test!
 	}
 
 	/** FLASH POWER ON */
 	if((testBits & SELFTEST_FLASH_BAD_BLOCKS) || (testBits & SELFTEST_FLASH_READ_WRITE) || (testBits & SELFTEST_FLASH_FULL_ERASE)) { // flash related tests
-		printf("Selftest: - flash power on -\n");
+		printf("%d Selftest: - flash power on -\n", ((uint32_t) Timing::millis()));
 		if(!flashPowerOn(true)) { printf("..FAILED (power on)\n"); return false; }
 	}
 
 	/** Flash bad blocks */
-	printf("Selftest: 08: Flash bad blocks..");
+	printf("%d Selftest: 08: Flash bad blocks..", ((uint32_t) Timing::millis()));
 	if((testBits & SELFTEST_FLASH_BAD_BLOCKS) == 0) { printf("..SKIPPED\n"); }
 	else {
 		printf("\n");
@@ -238,7 +240,7 @@ bool WildFiTagREV6::selfTest(uint16_t voltageSupplied, uint32_t testBits) {
 	}
 
 	/** Flash read/write */
-	printf("Selftest: 09: Flash write/read page 0 and 32..");
+	printf("%d Selftest: 09: Flash write/read page 0 and 32..", ((uint32_t) Timing::millis()));
 	if((testBits & SELFTEST_FLASH_READ_WRITE) == 0) { printf("..SKIPPED\n"); }
 	else {
 		uint8_t *testData = NULL;
@@ -289,7 +291,7 @@ bool WildFiTagREV6::selfTest(uint16_t voltageSupplied, uint32_t testBits) {
 	}
 
 	/** Flash full erase */
-	printf("Selftest: 10: Flash FULL ERASE (starts in 1s)..");
+	printf("%d Selftest: 10: Flash FULL ERASE (starts in 1s)..", ((uint32_t) Timing::millis()));
 	if((testBits & SELFTEST_FLASH_FULL_ERASE) == 0) { printf("..SKIPPED\n"); }
 	else {
 		delay(1000);
@@ -299,13 +301,13 @@ bool WildFiTagREV6::selfTest(uint16_t voltageSupplied, uint32_t testBits) {
 
 	/** FLASH POWER OFF */
 	if((testBits & SELFTEST_FLASH_BAD_BLOCKS) || (testBits & SELFTEST_FLASH_READ_WRITE) || (testBits & SELFTEST_FLASH_FULL_ERASE)) { // flash related tests
-		printf("Selftest: - flash power off -\n");
+		printf("%d Selftest: - flash power off -\n", ((uint32_t) Timing::millis()));
 		delay(200);
 		if(!flashPowerOff(true)) { printf("ERROR FLASH OFF\n"); return false; } // DONE WITH FLASH HERE!
 	}
 
 	/** NVS full reset */
-	printf("Selftest: 11: NVS full reset..");
+	printf("%d Selftest: 11: NVS full reset..", ((uint32_t) Timing::millis()));
 	if((testBits & SELFTEST_NVS_RESET) == 0) { printf("..SKIPPED\n"); }
 	else {
 		if(!resetDataNVS()) { printf("..FAILED (reset)\n"); return false; }
@@ -314,7 +316,7 @@ bool WildFiTagREV6::selfTest(uint16_t voltageSupplied, uint32_t testBits) {
 	}
 
 	/** Clock down */
-	printf("Selftest: 12: CPU clock down to 10MHz..");
+	printf("%d Selftest: 12: CPU clock down to 10MHz..", ((uint32_t) Timing::millis()));
 	if((testBits & SELFTEST_CPU_CLOCK_DOWN) == 0) { printf("..SKIPPED\n"); }
 	else {
 		setCPUSpeed(ESP32_10MHZ);
@@ -329,7 +331,7 @@ bool WildFiTagREV6::selfTest(uint16_t voltageSupplied, uint32_t testBits) {
 	}
 
 	/** WiFi scan @19.5dBm */
-	printf("Selftest: 13: WiFi scan..");
+	printf("%d Selftest: 13: WiFi scan..", ((uint32_t) Timing::millis()));
 	if((testBits & SELFTEST_WIFI_SCAN) == 0) { printf("..SKIPPED\n"); }
 	else {
 		if(!initWiFi()) { printf("..FAILED (init)\n"); disconnectAndStopWiFi(); return false; }
@@ -343,7 +345,7 @@ bool WildFiTagREV6::selfTest(uint16_t voltageSupplied, uint32_t testBits) {
 	}
 
 	/** ESP NOW long range messages @19.5dBm */
-	printf("Selftest: 14: ESP NOW..");
+	printf("%d Selftest: 14: ESP NOW..", ((uint32_t) Timing::millis()));
 	if((testBits & SELFTEST_ESPNOW_BROADCAST) == 0) { printf("..SKIPPED\n"); }
 	else {
 		delay(500);
@@ -358,7 +360,7 @@ bool WildFiTagREV6::selfTest(uint16_t voltageSupplied, uint32_t testBits) {
 		stopESPNOW();
 		printf("..OKAY\n");
 	}
-	printf("Selftest: FINISHED WITHOUT PROBLEMS!\n");
+	printf("%d Selftest: FINISHED WITHOUT PROBLEMS!\n", ((uint32_t) Timing::millis()));
 
 	return true;
 }
@@ -748,6 +750,20 @@ void WildFiTagREV6::ledGreenOff() {
 	gpio_set_level(PIN_LED_GREEN, 0);
 }
 
+void WildFiTagREV6::blinkGreenRedAlternating(uint8_t howOften) {
+	if(howOften == 0) { return; }
+	ledRedOff();
+	ledGreenOff();
+	for(uint8_t i=0; i<howOften; i++) {
+		if(i % 2 == 0) { ledRedOn(); }
+		else { ledGreenOn(); }
+		delay(BLINKY_ON_DELAY);
+		if(i % 2 == 0) { ledRedOff(); }
+		else { ledGreenOff(); }
+		if(i < (howOften - 1)) { delay(BLINKY_PAUSE_DELAY); } // last iteration -> do not add delay
+	}
+}
+
 void WildFiTagREV6::blinkTimes(uint8_t howOften, blink_t color, bool addDelayAtEnd) {
 	if((howOften == 0) || (color == B_NONE)) { return; }
 	ledRedOff();
@@ -861,12 +877,22 @@ void WildFiTagREV6::enableInternalTimerInterruptInDeepSleep(uint32_t seconds) {
 	esp_sleep_enable_timer_wakeup(sleepTimeInUs);
 }
 
+void WildFiTagREV6::ultraShortDeepSleep() {
+	uint64_t sleepTimeInUs = 1000ULL; // 1ms
+	esp_sleep_enable_timer_wakeup(sleepTimeInUs);
+	deepSleep();
+}
+
 void WildFiTagREV6::enableWakeUpPinInDeepSleep() {
 	esp_sleep_enable_ext1_wakeup(PIN_WAKEUP_BITMASK, ESP_EXT1_WAKEUP_ALL_LOW); // EXT1 requires bitmask of pins
 }
 
 void WildFiTagREV6::enableAccInterruptInDeepSleep() {
 	esp_sleep_enable_ext1_wakeup(PIN_ACC_INT_BITMASK, ESP_EXT1_WAKEUP_ANY_HIGH); // EXT1 requires bitmask of pins
+}
+
+void WildFiTagREV6::disableAccInterruptInDeepSleep() {
+	esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_EXT1);
 }
 
 void WildFiTagREV6::enableRTCInterruptInDeepSleep() {
@@ -962,6 +988,422 @@ void WildFiTagREV6::uart2InterruptPrint(uint16_t stopAfter) {
 	}
 }
 
+/** ----- UART 1 ----- */
+
+bool WildFiTagREV6::serialMenue(bool blinkRed, const char *nvsOwnIdString, const char *nvsActivationString, void (*gpsFunction)(void)) {
+    bool didEnterMenue = false;
+    setCPUSpeed(ESP32_10MHZ);
+    printf("serialMenue: press 'w' to enter\n");
+	uint16_t voltageMeasured = readSupplyVoltage();
+	if(blinkRed) {
+		uint16_t blinkies = 0;
+		blinkies = (voltageMeasured / 150) - 20;
+		if(blinkies < 2) { blinkies = 2; }
+    	blinkTimes(blinkies, B_RED);
+	}
+    if(waitOnChar('w', 3)) {
+        setCPUSpeed(ESP32_80MHZ);
+		printf("** ------------------- **\n");
+        printf("** WILDFI SERIAL MENUE **\n");
+		printf("** ------------------- **\n");
+		printf("** Vbatt = %d mV **\n", voltageMeasured);
+        printf("1\tdelete flash memory and NVS\n");
+        printf("2\tcalibrate IMU\n");
+        printf("3\tre-calibrate IMU (forced)\n");
+        printf("4\tself-test 1 (voltage, leds, hall sensor, i2c, rtc, imu, baro, clock-down, esp-now)\n");
+        printf("5\tself-test 2 (full with IMU foc, flash bad block test, flash reset, NVS reset)\n");
+        if(nvsOwnIdString == NULL) { printf("6\twrite id (NOT SUPPORTED)\n"); }
+		else { printf("6\twrite id\n"); }
+        printf("7\tread flash memory\n");
+        printf("8\treset config (normal NVS)\n");
+		printf("9\tprint data NVS entries\n");
+		printf("10\tprint normal NVS entries\n");
+		if(gpsFunction == NULL) { printf("11\tset GPS baudrate (NOT SUPPORTED)\n"); }
+		else { printf("11\tset GPS baudrate\n"); }
+        if(nvsActivationString == NULL) { printf("12\twrite activation (NOT SUPPORTED)\n"); }
+		else { printf("12\twrite activation\n"); }
+		printf("13\tflash bad block test\n");
+		printf("14\tmodify normal NVS entries\n");
+        printf("q\tquit\n");
+		printf("-> enter number and hit enter!\n");
+		uint32_t selection = waitOnNumberInput(60);
+        if(selection == 1) {
+            printf("- %d selected -> FULL RESET!\n", selection);
+            selfTest(0, SELFTEST_FLASH_FULL_ERASE | SELFTEST_NVS_RESET, 2);
+            delay(6000);
+            didEnterMenue = true;
+        }
+        else if(selection == 2) {
+            printf("- %d selected -> CALIBRATING IMU!\n", selection);
+            selfTest(0, SELFTEST_ACC_GYRO_FOC_CHECK | SELFTEST_ACC_GYRO_FOC_EXECUTE_IF_UNSET, 3);
+            delay(6000);
+            didEnterMenue = true;
+        }
+        else if(selection == 3) {
+            printf("- %d selected -> RE-CALIBRATING IMU (FORCED)!\n", selection);
+            selfTest(0, SELFTEST_ACC_GYRO_FOC_CHECK | SELFTEST_ACC_GYRO_FOC_FORCE_EXECUTION, 3);
+            delay(6000);
+            didEnterMenue = true;
+        }
+        else if(selection == 4) {
+            printf("- %d selected -> SELF-TEST! Please enter current voltage in mV:\n", selection);
+            uint32_t voltageRef = waitOnNumberInput(15);
+            printf("Entered value: %d\n", voltageRef);
+            selfTest((uint16_t) voltageRef, SELFTEST_VOLTAGE | SELFTEST_LEDS | SELFTEST_HALLSENSOR | SELFTEST_I2C | SELFTEST_RTC | SELFTEST_ACC_GYRO_FOC_CHECK /*| SELFTEST_ACC_GYRO_FOC_EXECUTE_IF_UNSET*/ /*| SELFTEST_ACC_GYRO_FOC_FORCE_EXECUTION*/ | SELFTEST_BARO /*| SELFTEST_FLASH_BAD_BLOCKS | SELFTEST_FLASH_READ_WRITE | SELFTEST_FLASH_FULL_ERASE | SELFTEST_NVS_RESET*/ | SELFTEST_CPU_CLOCK_DOWN | /*SELFTEST_WIFI_SCAN |*/ SELFTEST_ESPNOW_BROADCAST, 2);
+            delay(6000);
+            didEnterMenue = true;
+        }
+        else if(selection == 5) {
+            printf("- %d selected -> SELF-TEST (FULL)! Please enter current voltage in mV:\n", selection);
+            uint32_t voltageRef = waitOnNumberInput(15);
+            printf("Entered value: %d\n", voltageRef);
+            selfTest((uint16_t) voltageRef, SELFTEST_VOLTAGE | SELFTEST_LEDS | SELFTEST_HALLSENSOR | SELFTEST_I2C | SELFTEST_RTC | SELFTEST_ACC_GYRO_FOC_CHECK | SELFTEST_ACC_GYRO_FOC_EXECUTE_IF_UNSET /*| SELFTEST_ACC_GYRO_FOC_FORCE_EXECUTION*/ | SELFTEST_BARO | SELFTEST_FLASH_BAD_BLOCKS | SELFTEST_FLASH_READ_WRITE | SELFTEST_FLASH_FULL_ERASE | SELFTEST_NVS_RESET | SELFTEST_CPU_CLOCK_DOWN | /*SELFTEST_WIFI_SCAN |*/ SELFTEST_ESPNOW_BROADCAST, 2);
+            delay(6000);
+            didEnterMenue = true;
+        }
+        else if(selection == 6) {
+			if(nvsOwnIdString == NULL) {
+				printf("NOT POSSIBLE in this version!\n");
+			}
+			else {
+				if(!initNVS()) { printf("ERROR1\n"); }
+				else {
+					bool neverWritten = false;
+					uint16_t currentTagId = defaultNvsReadUINT16(nvsOwnIdString, &neverWritten);
+					printf("- %d selected -> WRITE ID (current: %04X = %d, neverWritten: %d)! Please enter id (1 - %d):\n", selection, currentTagId, currentTagId, neverWritten, 0xFFFF);
+					uint32_t id = waitOnNumberInput(60);
+					printf("Entered value: %d (0x%04X)\n", id, id);
+					if((id > 0) && (id <= 0xFFFF)) { // id = 0 not allowed
+						if(!defaultNvsWriteUINT16(nvsOwnIdString, (uint16_t) id)) { printf("ERROR2\n"); }
+						else { printf("DONE!\n"); }
+					}
+					else { printf("INVALID\n"); }
+				}
+			}
+            didEnterMenue = true;
+        }
+        else if(selection == 7) {
+            printf("- %d selected -> READ MEMORY!\nPlease enter start page (0 - %d):\n", selection, MT29_NUMBER_PAGES-1);
+            uint32_t startPage = waitOnNumberInput(60);
+            printf("Entered value: %d\n", startPage);
+            if(startPage < MT29_NUMBER_PAGES) {
+                printf("Please enter number of pages (1 - %d): \n", MT29_NUMBER_PAGES - startPage);
+                uint32_t numberPages = waitOnNumberInput(60);
+                printf("Entered value: %d\n", numberPages);
+                if((numberPages > 0) && (numberPages <= (MT29_NUMBER_PAGES - startPage))) {
+					esp_task_wdt_init(120, false); // set task watchdog timeout to 120 seconds
+    				if(!flashPowerOn()) { printf("ERROR FLASH\n"); }
+    				delay(500);
+    				if(!flash.printFlash(startPage, numberPages, MT29_CACHE_SIZE, false)) { printf("ERROR FLASH2\n"); }
+    				if(!flashPowerOff(true)) { printf("ERROR FLASH3\n"); }
+                }
+                else { printf("INVALID\n"); }
+            }
+            else { printf("INVALID\n"); }
+            didEnterMenue = true;
+        }
+        else if(selection == 8) {
+            printf("- %d selected -> RESET CONFIG (NORMAL NVS)\n", selection);
+            if(!resetNVS()) { printf("FAILED\n"); }
+            else { printf("DONE!\n"); }
+            didEnterMenue = true;
+        }
+		else if(selection == 9) {
+			printf("- %d selected -> PRINT NVS!\n", selection);
+			if(!initDataNVS()) { printf("ERROR1\n"); }
+			else {
+				nvs_iterator_t it = nvs_entry_find(NVS_DATA_PARTITION, "storage", NVS_TYPE_ANY);
+				uint32_t counter = 0;
+				while(it != NULL) {
+					nvs_entry_info_t info;
+					nvs_entry_info(it, &info);
+					it = nvs_entry_next(it);
+					if(info.type == NVS_TYPE_U8) {
+						uint8_t val = nvsReadUINT8(info.key);
+						printf("%d key '%s', type 'U8', val '%d'\n", counter, info.key, val);
+					}
+					else if(info.type == NVS_TYPE_U16) {
+						uint16_t val = nvsReadUINT16(info.key);
+						printf("%d key '%s', type 'U16', val '%d'\n", counter, info.key, val);
+					}
+					else if(info.type == NVS_TYPE_U32) {
+						uint32_t val = nvsReadUINT32(info.key);
+						printf("%d key '%s', type 'U32', val '%d'\n", counter, info.key, val);
+					}
+					else if(info.type == NVS_TYPE_BLOB) {
+						uint32_t size = nvsGetBlobSize(info.key);
+						printf("%d key '%s', type 'BLOB', size '%d'\n", counter, info.key, size);
+					}
+					else {
+						printf("%d key '%s', type '%d', VAL NOT SUPPORTED\n", counter, info.key, info.type);
+					}
+					counter++;
+				}
+				if(counter == 0) {
+					printf("- DATA NVS EMPTY -\n");
+				}
+			}
+			didEnterMenue = true;
+		}
+		else if(selection == 10) {
+			printf("- %d selected -> PRINT NORMAL NVS!\n", selection);
+			if(!initNVS()) { printf("ERROR1\n"); }
+			else {
+				nvs_iterator_t it = nvs_entry_find(NVS_DEFAULT_PARTITION, "storage", NVS_TYPE_ANY);
+				uint32_t counter = 0;
+				while(it != NULL) {
+					nvs_entry_info_t info;
+					nvs_entry_info(it, &info);
+					it = nvs_entry_next(it);
+					bool neverWritten = false;
+					if(info.type == NVS_TYPE_U8) {
+						uint8_t val = defaultNvsReadUINT8(info.key, &neverWritten);
+						printf("%d key '%s', type 'U8', val '%d'\n", counter, info.key, val);
+					}
+					else if(info.type == NVS_TYPE_U16) {
+						uint16_t val = defaultNvsReadUINT16(info.key, &neverWritten);
+						printf("%d key '%s', type 'U16', val '%d'\n", counter, info.key, val);
+					}
+					else if(info.type == NVS_TYPE_U32) {
+						uint32_t val = defaultNvsReadUINT32(info.key, &neverWritten);
+						printf("%d key '%s', type 'U32', val '%d'\n", counter, info.key, val);
+					}
+					else {
+						printf("%d key '%s', type '%d', VAL NOT SUPPORTED\n", counter, info.key, info.type);
+					}
+					counter++;
+				}
+				if(counter == 0) {
+					printf("- NORMAL NVS EMPTY -\n");
+				}
+			}
+			didEnterMenue = true;
+		}
+		else if(selection == 11) {
+			printf("- %d selected -> SET GPS BAUDRATE!\n", selection);
+			if(gpsFunction == NULL) {
+				printf("NOT POSSIBLE in this version!\n");
+			}
+			else {
+				gpsFunction();
+			}
+			didEnterMenue = true;
+		}
+        else if(selection == 12) {
+			if(nvsActivationString == NULL) {
+				printf("NOT POSSIBLE in this version!\n");
+			}
+			else {
+				if(!initDataNVS()) { printf("ERROR1\n"); }
+				else {
+					bool neverWritten = false;
+					uint16_t currentActivation = nvsReadUINT16(nvsActivationString);
+					printf("- %d selected -> WRITE ACTIVATION (current: %04X = %d)! Enter 0 to deactivate, 1 to activate.\n", selection, currentActivation, currentActivation);
+					uint32_t newActivation = waitOnNumberInput(60);
+					printf("Entered value: %d (0x%04X)\n", newActivation, newActivation);
+					if(!nvsWriteUINT16(nvsActivationString, (uint16_t) newActivation)) { printf("ERROR2\n"); }
+					else { printf("DONE!\n"); }
+				}
+			}
+            didEnterMenue = true;
+        }
+        else if(selection == 13) {
+            printf("- %d selected -> FLASH BAD BLOCK TEST\n", selection);
+            selfTest(0, SELFTEST_FLASH_BAD_BLOCKS, 5);
+            delay(5000);
+            didEnterMenue = true;
+        }
+		else if(selection == 14) {
+            printf("- %d selected -> MODIFY NORMAL NVS ENTRIES\n", selection);
+			if(!initNVS()) { printf("ERROR1\n"); }
+			else {
+				const uint8_t maxStringLength = 10;
+				char stringInput[maxStringLength] = { 0 };
+				while(1) {
+					printf("- Enter NVS name and press enter (enter for quit):\n");
+					if(waitOnStringInput(stringInput, maxStringLength, 60)) {
+						printf("- Entered: %s\n", stringInput);
+						uint8_t typeOfEntry = 0;
+						bool neverWritten = false;
+						uint32_t val = 0; 
+						// TIMMBO
+						val = (uint32_t) defaultNvsReadUINT8(stringInput, &neverWritten);
+						if(neverWritten) {
+							val = (uint32_t) defaultNvsReadUINT16(stringInput, &neverWritten);
+							if(neverWritten) {
+								val = defaultNvsReadUINT32(stringInput, &neverWritten);
+								if(neverWritten) { typeOfEntry = 0; } // not existing
+								else { typeOfEntry = 3; } // u32
+							}
+							else { typeOfEntry = 2; } // u16
+						}
+						else { typeOfEntry = 1; } // u8
+
+						if(typeOfEntry == 0) {
+							printf("- Not existing, creating new, enter type (0 = U8, 1 = U16, 2 = U32):\n");
+							uint32_t typeInput = waitOnNumberInput(60);
+							if(typeInput < 3) {
+								printf("- Enter value:\n");
+								uint32_t valueInput = waitOnNumberInput(60);
+								if(typeInput == 0) {
+									if(!defaultNvsWriteUINT8(stringInput, (uint8_t) valueInput)) { printf("- ERROR\n"); }
+									else { printf("- CREATED U8: %s = %d\n", stringInput, (uint8_t) valueInput); }
+								}
+								else if(typeInput == 1) {
+									if(!defaultNvsWriteUINT16(stringInput, (uint16_t) valueInput)) { printf("- ERROR\n"); }
+									else { printf("- CREATED U16: %s = %d\n", stringInput, (uint16_t) valueInput); }
+								}
+								else if(typeInput == 2) {
+									if(!defaultNvsWriteUINT32(stringInput, (uint32_t) valueInput)) { printf("- ERROR\n"); }
+									else { printf("- CREATED U32: %s = %d\n", stringInput, (uint32_t) valueInput); }
+								}
+							}
+							else { printf("- Invalid!\n"); }
+						}
+						else {
+							if(typeOfEntry == 1) { printf("- Existing, Type: U8, Value: %d\n", val); }
+							else if(typeOfEntry == 2) { printf("- Existing, Type: U16, Value: %d\n", val); }
+							else if(typeOfEntry == 3) { printf("- Existing, Type: U32, Value: %d\n", val); }
+							printf("- Enter value:\n");
+							uint32_t valueInput = waitOnNumberInput(60);
+							if(typeOfEntry == 1) {
+								if(!defaultNvsWriteUINT8(stringInput, (uint8_t) valueInput)) { printf("- ERROR\n"); }
+								else { printf("- CREATED U8: %s = %d\n", stringInput, (uint8_t) valueInput); }
+							}
+							else if(typeOfEntry == 2) {
+								if(!defaultNvsWriteUINT16(stringInput, (uint16_t) valueInput)) { printf("- ERROR\n"); }
+								else { printf("- CREATED U16: %s = %d\n", stringInput, (uint16_t) valueInput); }
+							}
+							else if(typeOfEntry == 3) {
+								if(!defaultNvsWriteUINT32(stringInput, (uint32_t) valueInput)) { printf("- ERROR\n"); }
+								else { printf("- CREATED U32: %s = %d\n", stringInput, (uint32_t) valueInput); }
+							}
+						}
+					}
+					else {
+						printf("Ciao!\n"); 
+						break;
+					}
+				}
+			}
+            delay(2000);
+            didEnterMenue = true;
+        }
+        else {
+            printf("Timeout or command (%d) unknown -> CIAO!\n", selection);
+        }
+         
+    }
+    setCPUSpeed(ESP32_80MHZ);
+    if(didEnterMenue) { Timing::delay(100); } // wait a bit for serial stuff to settle down
+    return didEnterMenue; // re-start if did enter menue
+}
+
+bool WildFiTagREV6::waitOnChar(char c, uint16_t timeoutSeconds) {
+    bool gotIt = false;
+    uint64_t timeStartListening = Timing::millis();
+    uint8_t readChar = 0xFF;
+    while(1) {
+        readChar = fgetc(stdin);
+        if(readChar == c) {
+            gotIt = true;
+            break;
+        }
+        if((Timing::millis() - timeStartListening) > (timeoutSeconds * 1000)) {
+            break;
+        }
+    }
+    return gotIt;
+}
+
+char WildFiTagREV6::waitOnAnyChar(uint16_t timeoutSeconds) {
+    bool gotIt = false;
+    uint64_t timeStartListening = Timing::millis();
+    uint8_t readChar = 0xFF;
+    while(1) {
+        readChar = fgetc(stdin);
+        if(readChar != 0xFF) {
+            gotIt = true;
+            break;
+        }
+        if((Timing::millis() - timeStartListening) > (timeoutSeconds * 1000)) {
+            break;
+        }
+    }
+	if(gotIt) { return readChar; }
+    return 0xFF;
+}
+
+uint32_t WildFiTagREV6::waitOnNumberInput(uint16_t timeoutSeconds) {
+	const uint8_t maxLength = 10;
+	char line[maxLength+1] = { 0 };
+	uint8_t index = 0;
+	char c = 0;
+	uint32_t result = 0;
+	
+    uint8_t readChar = 0;
+	uint64_t timeStartListening = Timing::millis();
+    while(readChar != 0xFF) { // wait until nothing pressed anymore
+		readChar = fgetc(stdin);
+		if((Timing::millis() - timeStartListening) > (timeoutSeconds * 1000)) { return 0; }
+	}
+
+	while(1) {
+		c = waitOnAnyChar(timeoutSeconds);
+		//printf("-%02X-", c); // REMOVE!
+		if(c == 0xFF) { break; }
+
+		if(c != '\n' && c != '\r') { // do not add \n and \r
+			line[index++] = c;
+			if(index >= maxLength) {
+				line[index] = '\0'; // zero terminate string
+				break;
+			}
+		}
+		if(c == '\n') {
+			line[index] = '\0'; // zero terminate string
+			break;
+		}
+	}
+	if(strlen(line) > 0) { result = atoi(line); }
+	return result;
+}
+
+bool WildFiTagREV6::waitOnStringInput(char *buffer, uint8_t bufferLen, uint16_t timeoutSeconds) {
+	uint8_t index = 0;
+	char c = 0;
+	uint32_t result = 0;
+    uint8_t readChar = 0;
+	uint64_t timeStartListening = Timing::millis();
+
+	if((bufferLen <= 1) || (buffer == NULL)) { return false; }
+
+    while(readChar != 0xFF) { // wait until nothing pressed anymore
+		readChar = fgetc(stdin);
+		if((Timing::millis() - timeStartListening) > (timeoutSeconds * 1000)) { return 0; }
+	}
+
+	while(1) {
+		c = waitOnAnyChar(timeoutSeconds);
+		printf("%c", c);
+		if(c == 0xFF) { break; }
+		
+		if(c != '\n' && c != '\r') { // do not add \n and \r
+			buffer[index++] = c;
+			if(index >= (bufferLen - 1)) {
+				buffer[index] = '\0'; // zero terminate string
+				break;
+			}
+		}
+		if(c == '\n') {
+			buffer[index] = '\0'; // zero terminate string
+			break;
+		}
+	}
+	if(strlen(buffer) > 0) { return true; }
+	return false;
+}
+
 /** ----- NVS ----- */
 
 bool WildFiTagREV6::initNVS() {
@@ -977,6 +1419,13 @@ bool WildFiTagREV6::initNVS() {
 			return false;
 		}
 		NVSinitialized = true;
+	}
+	return true;
+}
+
+bool WildFiTagREV6::resetNVS() {
+	if(nvs_flash_erase_partition(NVS_DEFAULT_PARTITION) != ESP_OK) {
+		return false;
 	}
 	return true;
 }
@@ -998,6 +1447,17 @@ bool WildFiTagREV6::initDataNVS() {
 	return true;
 }
 
+uint32_t WildFiTagREV6::nvsGetBlobSize(const char *key) {
+	esp_err_t err;
+    nvs_handle_t handle;
+    size_t nvsDataLen = 0;  // value will default to 0, if not set yet in NVS
+    if(nvs_open_from_partition(NVS_DATA_PARTITION, "storage", NVS_READWRITE, &handle) != ESP_OK) { return 0; }
+    err = nvs_get_blob(handle, key, NULL, &nvsDataLen); // 0ms
+    if(err == ESP_ERR_NVS_NOT_FOUND) { nvsDataLen = 0; } // first time, blob is empty
+    nvs_close(handle);
+	return ((uint32_t) nvsDataLen);
+}
+
 bool WildFiTagREV6::resetDataNVS() {
 	if(nvs_flash_erase_partition(NVS_DATA_PARTITION) != ESP_OK) {
 		return false;
@@ -1012,6 +1472,180 @@ void WildFiTagREV6::printDataNVSStats() {
 	nvs_stats_t nvs_stats;
     nvs_get_stats(NVS_DATA_PARTITION, &nvs_stats);
     printf("NVS Data: UsedEntries = (%d), FreeEntries = (%d), AllEntries = (%d)\n", nvs_stats.used_entries, nvs_stats.free_entries, nvs_stats.total_entries);
+}
+
+uint32_t WildFiTagREV6::defaultNvsReadUINT32(const char *key, bool *neverWritten) {
+	esp_err_t err;
+	uint32_t value = 0; // default 0 if not existing
+	*neverWritten = false;
+	if(!NVSinitialized) {
+		return 0;
+	}
+	// open
+    nvs_handle_t handle;
+    err = nvs_open_from_partition(NVS_DEFAULT_PARTITION, "storage", NVS_READWRITE, &handle);
+    if (err != ESP_OK) {
+        return 0;
+    }
+	// read
+    err = nvs_get_u32(handle, key, &value);
+	nvs_close(handle);
+    switch (err) {
+        case ESP_OK:
+			return value;
+            break;
+        case ESP_ERR_NVS_NOT_FOUND:
+            // value not initialized
+			*neverWritten = true;
+			return 0;
+            break;
+        default :
+		    *neverWritten = true;
+            return 0;
+    }
+	return 0;
+}
+
+uint16_t WildFiTagREV6::defaultNvsReadUINT16(const char *key, bool *neverWritten) {
+	esp_err_t err;
+	uint16_t value = 0; // default 0 if not existing
+	*neverWritten = false;
+	if(!NVSinitialized) {
+		return 0;
+	}
+	// open
+    nvs_handle_t handle;
+    err = nvs_open_from_partition(NVS_DEFAULT_PARTITION, "storage", NVS_READWRITE, &handle);
+    if (err != ESP_OK) {
+        return 0;
+    }
+	// read
+    err = nvs_get_u16(handle, key, &value);
+	nvs_close(handle);
+    switch (err) {
+        case ESP_OK:
+			return value;
+            break;
+        case ESP_ERR_NVS_NOT_FOUND:
+            // value not initialized
+			*neverWritten = true;
+			return 0;
+            break;
+        default :
+		    *neverWritten = true;
+            return 0;
+    }
+	return 0;
+}
+
+uint8_t WildFiTagREV6::defaultNvsReadUINT8(const char *key, bool *neverWritten) {
+	esp_err_t err;
+	uint8_t value = 0; // default 0 if not existing
+	*neverWritten = false;
+	if(!NVSinitialized) {
+		return 0;
+	}
+	// open
+    nvs_handle_t handle;
+    err = nvs_open_from_partition(NVS_DEFAULT_PARTITION, "storage", NVS_READWRITE, &handle);
+    if (err != ESP_OK) {
+        return 0;
+    }
+	// read
+    err = nvs_get_u8(handle, key, &value);
+	nvs_close(handle);
+    switch (err) {
+        case ESP_OK:
+			return value;
+            break;
+        case ESP_ERR_NVS_NOT_FOUND:
+            // value not initialized
+			*neverWritten = true;
+			return 0;
+            break;
+        default :
+		    *neverWritten = true;
+            return 0;
+    }
+	return 0;
+}
+
+bool WildFiTagREV6::defaultNvsWriteUINT32(const char *key, uint32_t val) {
+	esp_err_t err;
+	if(!NVSinitialized) {
+		return false;
+	}
+	// open
+    nvs_handle_t handle;
+    err = nvs_open_from_partition(NVS_DEFAULT_PARTITION, "storage", NVS_READWRITE, &handle);
+    if (err != ESP_OK) {
+        return false;
+    }
+	// write
+	err = nvs_set_u32(handle, key, val); // 6-7ms (!)
+    if(err != ESP_OK) {
+		nvs_close(handle);
+		return false;
+	}
+    err = nvs_commit(handle);
+    if(err != ESP_OK) {
+		nvs_close(handle);
+		return false;
+	}
+    nvs_close(handle);
+	return true;
+}
+
+bool WildFiTagREV6::defaultNvsWriteUINT16(const char *key, uint16_t val) {
+	esp_err_t err;
+	if(!NVSinitialized) {
+		return false;
+	}
+	// open
+    nvs_handle_t handle;
+    err = nvs_open_from_partition(NVS_DEFAULT_PARTITION, "storage", NVS_READWRITE, &handle);
+    if (err != ESP_OK) {
+        return false;
+    }
+	// write
+	err = nvs_set_u16(handle, key, val); // 6-7ms (!)
+    if(err != ESP_OK) {
+		nvs_close(handle);
+		return false;
+	}
+    err = nvs_commit(handle);
+    if(err != ESP_OK) {
+		nvs_close(handle);
+		return false;
+	}
+    nvs_close(handle);
+	return true;
+}
+
+bool WildFiTagREV6::defaultNvsWriteUINT8(const char *key, uint8_t val) {
+	esp_err_t err;
+	if(!NVSinitialized) {
+		return false;
+	}
+	// open
+    nvs_handle_t handle;
+    err = nvs_open_from_partition(NVS_DEFAULT_PARTITION, "storage", NVS_READWRITE, &handle);
+    if (err != ESP_OK) {
+        return false;
+    }
+	// write
+	err = nvs_set_u8(handle, key, val); // 6-7ms (!)
+    if(err != ESP_OK) {
+		nvs_close(handle);
+		return false;
+	}
+    err = nvs_commit(handle);
+    if(err != ESP_OK) {
+		nvs_close(handle);
+		return false;
+	}
+    nvs_close(handle);
+	return true;
 }
 
 uint8_t WildFiTagREV6::nvsReadUINT8(const char *key) {
@@ -1570,11 +2204,16 @@ static void eventHandlerWiFi(void* arg, esp_event_base_t event_base, int32_t eve
 		wiFiConnected = WIFI_CONNECT_FAIL_AP_NOT_FOUND;
     } else if(event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) { // CONNECTED TO WIFI
         //ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
-		// printf("GOT IP");
+		//wiFiIP = &event->ip_info.ip;
+		// printf("GOT IP\n");
 		wiFiConnected = WIFI_CONNECT_SUCCESS;
         //s_retry_num = 0;
         //xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
     }
+}
+
+esp_ip4_addr_t WildFiTagREV6::getWiFiIP() {
+	return wiFiIP;
 }
 
 bool WildFiTagREV6::connectToWiFiAfterScan(const char* ssid, const char* password, uint8_t channel) {
@@ -3352,16 +3991,12 @@ bool WildFiTagREV6::getNTPTimestampUTCAndCompareAccuracy(bool storeInRTC, uint32
 				if(timeStruct.Wday > 6) { timeStruct.Wday = 6; }
 
 				// read time diff
-				bool error = false;
-				uint32_t oldTimestamp = rtc.getTimestamp(error);
-				uint32_t oldMilliseconds = (uint32_t) (rtc.get100thOfSeconds(error));
+				uint32_t oldTimestamp = 0;
+				uint8_t oldHundreds = 0;
+				rtc.getTimestamp(&oldTimestamp, &oldHundreds);
+				uint32_t oldMilliseconds = oldHundreds;
 				oldMilliseconds *= 10;
-				// PROBLEM: sometimes millis already 0, but rest not updated
-				if(oldMilliseconds == 0) {
-					printf("-> WRAP %u <-\n", oldTimestamp);
-					oldTimestamp = rtc.getTimestamp(error);
-					printf("-> WRAP NEW %u <-\n", oldTimestamp);
-				}
+
 				int64_t timestampBeforeMs = oldTimestamp;
 				timestampBeforeMs = (timestampBeforeMs * 1000) + oldMilliseconds;
 				int64_t timestampNowMs = (timestampUTC + 1);

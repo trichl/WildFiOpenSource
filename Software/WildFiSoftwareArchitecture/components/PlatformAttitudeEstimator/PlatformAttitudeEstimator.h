@@ -20,7 +20,7 @@ class PlatformAttitudeEstimator {
 		double radToDeg(double in);
 		double GiToMeterPerSecondSquare(double in);
 
-		bool feed(uint8_t *fifoData, uint16_t fifoLen, uint16_t imuFrequency, uint8_t accelRange, uint8_t gyroRange, bool setMagnetometerValuesToZero, int16_t magHardIronOffsetX, int16_t magHardIronOffsetY, int16_t magHardIronOffsetZ); // needs fifo with 9 axis data
+		bool feed(uint8_t *fifoData, uint16_t fifoLen, uint16_t imuFrequency, uint8_t accelRange, uint8_t gyroRange, bool setMagnetometerValuesToZero, int16_t magHardIronOffsetX, int16_t magHardIronOffsetY, int16_t magHardIronOffsetZ, bool resetAll, uint8_t debugLevel); // needs fifo with 9 axis data
 
 };
 

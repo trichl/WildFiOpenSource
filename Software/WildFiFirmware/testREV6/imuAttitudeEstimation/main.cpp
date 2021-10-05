@@ -88,6 +88,7 @@ extern "C" void app_main() {
             magHardIronOffsetZ = (magCalibration.zMin + magCalibration.zMax) / 2;
 
             stopIMU();
+
             startIMU(false);
 
             // Initialise the estimator (e.g. in the class constructor, none of these are actually strictly required for the estimator to work, and can be set at any time)
@@ -99,6 +100,19 @@ extern "C" void app_main() {
             //attEst.est.setAttitudeFused(M_PI, 0.0, 0.0, 1.0); // Optional: Use if you have prior knowledge about the orientation of the robot (Default: Identity orientation)
             //attEst.est.setGyroBias(0.152, 0.041, -0.079);     // Optional: Use if you have prior knowledge about the gyroscope bias (Default: (0.0, 0.0, 0.0))
             //attEst.est.setAccMethod(Est.ME_FUSED_YAW);        // Optional: Use if you wish to experiment with varying acc-only resolution methods
+
+            // REMOVE! TEST!
+            /*if(!device.flashPowerOn(true)) { printf("ERROR\n"); } // turn on flash power already (5ms)
+            uint8_t fifoData[1536] = { 0 };
+            for(uint16_t i=0; i<1536; i++) { fifoData[i] = 0xFF; }
+            uint32_t timeMeas = (uint32_t) Timing::millis();
+            uint32_t page = 65536;
+            uint16_t offset = 0;
+            sequential_write_status_t writeStatus = device.flash.fifoPushSimple(0, page, offset, fifoData, 1536, true, false);
+            //device.flash.printFlash(page, 1, 2048);
+            timeMeas = ((uint32_t) Timing::millis()) - timeMeas;
+            printf("FLASH TEST: %d -> %d.%d in %d ms\n", writeStatus, page, offset, timeMeas);
+            device.flashPowerOff(true);*/
 
         }
         else {
@@ -113,9 +127,11 @@ extern "C" void app_main() {
 
                 printf("Fifo: %d bytes\n", currentFifoLen);
                 //if(!device.imu.printFifoData(fifoData, currentFifoLen, BMX160_FIFO_DATASET_LEN_ACC_AND_MAG_AND_GYRO, accConfig.range, gyroConfig.range)) { printf("ERROR\n"); }
-                if(!attEst.feed(fifoData, currentFifoLen, 25, accConfig.range, gyroConfig.range, false, magHardIronOffsetX, magHardIronOffsetY, magHardIronOffsetZ)) { printf("ERROR2\n"); }
-                
-                printf("-----%d-----\n", lastErrorId);
+                uint32_t timeMeas = (uint32_t) Timing::millis();
+                if(!attEst.feed(fifoData, currentFifoLen, 25, accConfig.range, gyroConfig.range, false, magHardIronOffsetX, magHardIronOffsetY, magHardIronOffsetZ, false, 1)) { printf("ERROR2\n"); }
+                timeMeas = ((uint32_t) Timing::millis()) - timeMeas;
+
+                printf("Err: %d, T: %dms\n", lastErrorId, timeMeas);
                 device.delay(10); // for printf
                 device.ledGreenOff();
                 device.enableAccInterruptInDeepSleep();

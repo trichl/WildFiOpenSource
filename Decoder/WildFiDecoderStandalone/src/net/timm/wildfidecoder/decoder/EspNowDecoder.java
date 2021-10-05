@@ -28,7 +28,7 @@ public class EspNowDecoder {
             line += String.format("%02X", stream[iterator]);
             iterator++;
 
-            if ((line.length() == LogEntry.INDEX(1500)) || (iterator == stream.length)) { // 1500 bytes
+            if ((line.length() == LogEntry.INDEX(2000)) || (iterator == stream.length)) { // 2000 bytes
                 e = logEntryManager.createEntry(line, dataMessageCustomPrefix);
                 if(e == null) {
                     Log.d("decoder", "unknown prefix, decode ERROR at line " + line);

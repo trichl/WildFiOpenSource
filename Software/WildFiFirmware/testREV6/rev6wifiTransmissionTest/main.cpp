@@ -152,6 +152,8 @@ bool dataTransmissionWifi(bool forceMode, uint16_t minBlocksToTransmit, uint32_t
                         //heap_caps_free(dmaBuffer2048Bytes); // CAREFUL: task might still running if it supposed to be killed? -> DO NOT FREE MEMORY AT ALL
                         // also do not free memory of restPrefixPointer
                         /* -------- DELETING SUCCESSFULLY TRANSMITTED BLOCKS (ONLY FULLY TRANSMITTED) -------- */
+                        // DO NOT DELETE BLOCKS FOR THIS TEST HERE!!!
+                        /*
                         uint16_t flashBlockDeletedPointerBeforeDelete = flashBlockDeletedPointer; // remember old value for NVS update
                         for(uint16_t delBlocks=0; delBlocks<successfullyTransmittedBlocks; delBlocks++) { // deleting is based ONLY on fully transmitted blocks
                             if(!device.flash.fifoPopDelete(flashBlockDeletedPointer, flashPointer, MT29_NUMBER_PAGES, true)) { // delete block from flash and increment flashBlockDeletedPointer
@@ -160,13 +162,14 @@ bool dataTransmissionWifi(bool forceMode, uint16_t minBlocksToTransmit, uint32_t
                                 return somethingTransmitted; // error here means -> no pointers are updated, retransmitting maybe already deleted blocks, but very unlikely to happen
                             } 
                         }
+                        */
                         /* -------- UPDATING NVS POINTER -------- */
                         // FULL BLOCK POINTER
-                        if(flashBlockDeletedPointerBeforeDelete != flashBlockDeletedPointer) { // some blocks are now fully transmitted
-                            printf("%d WIFI-NVS: updating flashBlockDeletedPointer (old: %d, new: %d)\n", ((uint32_t) Timing::millis()), flashBlockDeletedPointerBeforeDelete, flashBlockDeletedPointer);
+                        //if(flashBlockDeletedPointerBeforeDelete != flashBlockDeletedPointer) { // some blocks are now fully transmitted
+                            //printf("%d WIFI-NVS: updating flashBlockDeletedPointer (old: %d, new: %d)\n", ((uint32_t) Timing::millis()), flashBlockDeletedPointerBeforeDelete, flashBlockDeletedPointer);
                             //device.nvsWriteUINT16(NVS_FLASH_SEND_NEXT_BLOCK_POINTER, flashBlockDeletedPointer);
                             somethingTransmitted = true; // ONLY HERE, not when half blocks were transfered because blocks are not deleted
-                        }
+                        //}
                     }
                     else printf("%d WIFI: SCANNED, but not found\n", ((uint32_t) Timing::millis()));
                     device.disconnectAndStopWiFi(); // disconnect here because before that no wifi actions

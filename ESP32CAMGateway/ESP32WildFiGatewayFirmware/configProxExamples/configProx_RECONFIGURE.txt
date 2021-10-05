@@ -1,0 +1,94 @@
+- command (PROXIMITY_COMMAND_NOTHING, PROXIMITY_COMMAND_DO_NOT_SEND, PROXIMITY_COMMAND_ACTIVATE, PROXIMITY_COMMAND_DEACTIVATE, PROXIMITY_COMMAND_CHANGE_CONFIG, PROXIMITY_COMMAND_FULL_RESET):
+PROXIMITY_COMMAND_CHANGE_CONFIG
+- useLeds (bool):
+true
+- trackerMode (1 byte, 0 = TESTRUN, 1 = PRODUCTIVE, 2 = SELFTEST):
+0
+- activationMode (1 byte, 0 = SKIP, 1 = STORE PERMANENTLY, 2 = ON EVERY START):
+0
+- getFirstTimeOverWiFi (bool):
+true
+- getFirstTimeOverGPS (bool):
+true
+- tagIdSource (1 byte, 1 = USE MAC LAST TWO BYTES, 2 = USE VALUE IN NVS):
+1
+- imuMode (1 byte, 0 = DEACTIVATED, 1 = ACC ONLY, 2 = ACC MAG GYRO):
+1
+- imuBurstMillis (4 byte):
+0
+- environmentActivated (bool):
+true
+- timeCorrectionBetweenTags (bool):
+true
+- timeCorrectionDiffMs (2 byte):
+50
+- freeMemoryIfFull (bool):
+true
+- accFrequency (1 byte, 1 = 0.78HZ, 2 = 1.56HZ, 3 = 3.12HZ, 4 = 6.25HZ, 5 = 12.5HZ, 6 = 25HZ, 7 = 50HZ, 8 = 100HZ, 9 = 200HZ, 10 = 400HZ, 11 = 800HZ, 12 = 1600HZ):
+6
+- accAvg (1 byte, 0 = AVG1, 1 = AVG2, 2 = AVG4, 3 = AVG8, 4 = AVG16):
+3
+- accRange (1 byte, 3 = 2G, 5 = 4G, 8 = 8G, 12 = 16G):
+8
+- magFrequency (1 byte, 1 = 0.78HZ, 2 = 1.56HZ, 3 = 3.12HZ, 4 = 6.25HZ, 5 = 12.5HZ, 6 = 25HZ, 7 = 50HZ):
+6
+- magAccuracy (1 byte, 0 = LOW POWER, 1 = REGULAR, 2 = ENHANCED, 3 = HIGH):
+1
+- gyroFrequency (1 byte, 6 = 25HZ, 7 = 50HZ, 8 = 100HZ, 9 = 200HZ, 10 = 400HZ, 11 = 800HZ, 12 = 1600HZ):
+6
+- gyroRange (1 byte, 0 = 2000DPS, 1 = 1000DPS, 2 = 500DPS, 3 = 250DPS, 4 = 125DPS):
+4
+- gyroMode (1 byte, 0 = OSR4, 1 = OSR2, 2 = NORMAL):
+2
+- nightTimeEnter (1 byte, 0 = ALWAYS NIGHT, 1 = USE HOURS, 2 = DISABLED):
+2
+- nightTimeTurnOnHour (1 byte):
+5
+- nightTimeTurnOnMinute (1 byte):
+0
+- nightTimeTurnOffHour (1 byte):
+23
+- nightTimeTurnOffMinute (1 byte):
+0
+- gpsFixHourBits (4 byte):
+0
+- gpsRandomizeFixes (bool):
+true
+- gpsRandomizeFixesPerDay (1 byte):
+1
+- gpsMinHdopTimesTen (1 byte):
+30
+- gpsFirstFixCollectOrbitDataSeconds (1 byte):
+60
+- gpsForcedAfterEveryProximity (bool):
+false
+- gpsSyncRTCFrequency (1 byte):
+6
+- proximityFrequencyMinute (1 byte):
+2
+- proximityFrequencyMinuteSeenSomeone (1 byte):
+1
+- proximityListeningIntervalMs (2 byte):
+1000
+- proximityDbm (1 byte):
+78
+- proximityDatarate (1 byte):
+0
+- proximityLongRange (bool):
+false
+- proximityAirTimeUs (2 byte):
+5200
+- activationByGatewayListeningTime (2 byte):
+120
+- activationByGatewaySleepSeconds (2 byte):
+60
+- battMinVoltage (2 byte):
+3550
+- battRestartVoltage (2 byte):
+3650
+- battMinVoltageDuringTransmission (2 byte):
+3300
+- timeWifiOutputPower (1 byte):
+44
+- timeBetweenGetTimeRetriesSeconds (2 byte):
+600

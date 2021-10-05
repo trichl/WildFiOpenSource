@@ -1,6 +1,6 @@
 # This file was automatically generated for projects
 # without default 'CMakeLists.txt' file.
 
-FILE(GLOB_RECURSE app_sources ${CMAKE_SOURCE_DIR}/firmware/hdLoggerREV5/*.*)
+FILE(GLOB_RECURSE app_sources D:/Dropbox/Promotion/WildFi/Software/WildFiFirmware/testREV5/micTest/*.*)
 
 idf_component_register(SRCS ${app_sources})

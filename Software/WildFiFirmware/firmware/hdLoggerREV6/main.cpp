@@ -6,7 +6,7 @@
 WildFiTagREV6 device = WildFiTagREV6();
 GPS_L70_REV6 gps = GPS_L70_REV6();
 
-// Next open error id: lastErrorId = 160 (further free)
+// Next open error id: lastErrorId = 181 (further free: a lot)
 
 // WARNING: THIS VERSION RUNS ON SINGLE CORE!
 // WARNING: ULP NEEDS TO BE DISABLED IN MENUCONFIG, OTHERWISE RTC SLOW MEMORY OVERFLOW (+512Kbyte for ULP)
@@ -46,33 +46,25 @@ GPS_L70_REV6 gps = GPS_L70_REV6();
     // @25Hz: memory full after 20 days, ???uA testrun (productive: 443uA) average WITHOUT esp now data transmission, 609uA (!!!) with esp now data transmission (sample 1 block -> transmit 1 block in 977-1064ms)
     // FAILED: custom PHY initialization -> RTC overflow by over 1868 bytes -> PHY init with each ESP NOW start (+ more milliseconds)
 
+// TEST: tryToGetFix change settings for getting time only
 // TEST: data transmission of two or three tags in parallel
-// TODO: gatewayAroundMac might change when multiple gateways around -> deactivate promiscous mode after gatewaySeen
-    // maybe solved, see " // TODO: NEW, TEST"
-
-// TODO: migrate ST_FORCE_DOWNLOAD from REV5 firmware 
-// TODO: fix wifi (ESPNOW_DATA_RATE not declared, ..) -> no, I think it's correct
+// TEST: gatewayAroundMac might change when multiple gateways around -> deactivate promiscous mode after gatewaySeen -> should be solved, see "// TODO: NEW, TEST"
+// TEST: migrate new imuLightSleepTrackingMode() from blackforestmovementlogger
 
 // TODO: tag around: add software versions, add memory status
-// TODO: BUG: const uint16_t GPS_HEADER_DATA_LEN = 19; -> not correct anymore!! -> SHOULD BE FIXED!!
-// TEST: migrate new imuLightSleepTrackingMode() from blackforestmovementlogger
-// TODO: force tracking and de-activation is not considered in imuDeepSleepTrackingMode() yet
-// TODO: RF full calibration does not work in imuDeepSleepTrackingMode()
-// TODO: sampling start and end time as configuration in gateway message
-// TODO: data transmission DURING special1hzdatamode
-// TODO: serial (?) interface for tag configuration / download and so on?
+// TODO: imuDeepSleepTrackingMode(): force tracking and de-activation is not considered yet
+// TODO: imuDeepSleepTrackingMode(): RF full calibration does not work (happens too late)
+// TODO: configuration via gateway (see proxLoggerREV6)
 
 /** GENERAL */
-// WARNING: if setting time needs more than 1 second -> loosing lightSleep sync! (should be solved)
+// WARNING: FLP mode does not work, as the 3 UART messages (ZDA, GPRMC, GPGGA) do not come in one burst but distributed over whole second (leading to UART timeout) -> messages arrive within 700ms (absolute bullshit)
 // WARNING: problem: partial page programming should only be done with 512 bytes, not randomly
     // WARNING: proximity detection data corruption after around 120 partial page writes (single page)
     // seems to be no issue if less than 4 partial page writes (independent of length)
-// TODO: detect GPS at start (by trying to set baud rate to 115200) -> use code from proximity logger
+// TODO (LOW PRIO): data transmission DURING light sleep tracking modes
 // TODO (LOW PRIO): new data with: ESP32 hall sensor
-// TODO (LOW PRIO): 1MHz I2C should not work with RTC?!? -> dynamic I2C speed switching -> TEST i2c.changeClockSpeed(I2C_FREQ_HZ_400KHZ)
+// TODO (LOW PRIO): 1MHz I2C should not work with RTC?!? -> dynamic I2C speed switching -> TEST i2c.changeClockSpeed(I2C_FREQ_HZ_400KHZ) -> TESTED, works
 // TODO (LOW PRIO): fifoPush -> add read back of written bytes? (ECC wrong anyhow)
-// TODO (WAIT): RTC_SLOW memory will be 8kByte instead of 4kByte in the next releases -> tested but seems buggy (fast wake up not working anymore)
-    // -> maybe modify esp idf manually?
 
 // RTC variables
 RTC_DATA_ATTR uint32_t timestampNextDataTransmission = 0;
@@ -80,7 +72,7 @@ RTC_DATA_ATTR uint32_t memFullWakeUpOnMinute = ST_MEMFULL_TRY_EVERY_FULL_MINUTE_
 RTC_DATA_ATTR uint8_t fifoDataRam[ACC_RAM_SIZE_1 * ACC_RAM_SIZE_2] = { 0 };
 RTC_DATA_ATTR uint16_t fifoDataPointerRam = 0;
 
-RTC_DATA_ATTR tracker_state_t state = ST_FIRST_START_HARD_RESET;
+RTC_DATA_ATTR tracker_state_t state = ST_BOOT;
 RTC_DATA_ATTR uint32_t startCnt = 0;
 RTC_DATA_ATTR uint8_t lastErrorId = 0;
 RTC_DATA_ATTR uint16_t errorCnt = 0;
@@ -121,6 +113,7 @@ void startIMU(bool readTrimData) {
     if(!device.imu.start(&accConfig, magConfigPointer, gyroConfigPointer, BMX160_LATCH_DUR_5_MILLI_SEC)) { lastErrorId = 1; errorCnt++; }
     if((TRACKING_DATA_MODE == TRACKING_DATA_MODE_IMU_HD_LIGHT_SLEEP) || (TRACKING_DATA_MODE == TRACKING_DATA_MODE_IMU_SD_DEEP_SLEEP)) {
         if(!device.imu.enableFIFOInterrupt(ACC_INTERRUPT_WATERMARK)) { lastErrorId = 2; errorCnt++; }
+        if(TRACKER_MODE == MODE_TESTRUN) { printf("startIMU: running with FIFO interrupt\n"); }
     }
     uint8_t fifoForWhat = BMX160_INIT_FIFO_FOR_ACC;
     if(USE_MAGNETOMETER) { fifoForWhat |= BMX160_INIT_FIFO_FOR_MAG; }
@@ -128,6 +121,7 @@ void startIMU(bool readTrimData) {
     if(!device.imu.initFIFO(fifoForWhat)) { lastErrorId = 3; errorCnt++; }
     if(!device.imu.resetFIFO()) { lastErrorId = 113; errorCnt++; }
     fifoDataPointerRam = 0; // reset RAM data
+    if(TRACKER_MODE == MODE_TESTRUN) { printf("startIMU: IMU started (errors: %d/%d)\n", lastErrorId, errorCnt); }
 }
 
 void stopIMU() {
@@ -270,17 +264,17 @@ bool itsTimeForDataTransmission(uint32_t currentTimestamp) {
 void handleCustomRFCalibration() {
     if(customRFCalibrationCnt == 0) { // never did a full calibration
         if(!device.fullRFCalibration()) { lastErrorId = 140; errorCnt++; } // 145 - 160ms
-        if(TRACKER_MODE == MODE_TESTRUN) { printf("RF: first time, FULL\n"); } 
+        if(TRACKER_MODE == MODE_TESTRUN) { printf("RF: first time, full calib (%d %d)\n", lastErrorId, errorCnt); } 
     }
     else {
         if(customRFCalibrationCnt >= ESPNOW_CUSTOM_RF_FULL_CALIB_EVERY_X_TIMES) { // every now and then: do full RF calibration
             customRFCalibrationCnt = 0;
             if(!device.fullRFCalibration()) { lastErrorId = 141; errorCnt++; } // 145 - 160ms
-            if(TRACKER_MODE == MODE_TESTRUN) { printf("RF: FULL CALIB\n"); } 
+            if(TRACKER_MODE == MODE_TESTRUN) { printf("RF: full calib (%d %d)\n", lastErrorId, errorCnt); } 
         }
         else {
             if(!device.onlyLoadRFCalibration()) { lastErrorId = 142; errorCnt++; } // 5ms, using RF data in RTC memory
-            if(TRACKER_MODE == MODE_TESTRUN) { printf("RF: LOAD CALIB\n"); } 
+            if(TRACKER_MODE == MODE_TESTRUN) { printf("RF: load only calib (%d %d)\n", lastErrorId, errorCnt); } 
         }        
     }
     customRFCalibrationCnt++;
@@ -675,7 +669,19 @@ void tryGetTimeOverGPS() {
     gps.init(device.uart2GetQueue());
     device.uart2EnablePatternInterrupt('\n');
     esp_gps_t gpsData = { };
-    if(gps.getTimeOnly(&gpsData, USE_GPS_TO_GET_TIME_TIMEOUT_SECONDS, &device, TRACKING_DATA_MODE_1HZ_GPS_BLINK, (TRACKER_MODE == MODE_TESTRUN))) {
+
+    // CHANGED to tryToGetFix to collect orbit data already and to only get time after getting real fix
+    //if(gps.getTimeOnly(&gpsData, USE_GPS_TO_GET_TIME_TIMEOUT_SECONDS, &device, TRACKING_DATA_MODE_1HZ_GPS_BLINK, (TRACKER_MODE == MODE_TESTRUN))) {
+    gps_get_fix_config_t gpsConfig = {
+        .timeoutSeconds = USE_GPS_TO_GET_TIME_TIMEOUT_SECONDS,
+        .timeoutNotEvenTimeSeconds = 120,
+        .minHDOP = 1.0f, // normally not reachable
+        .afterFixMaxWaitOnHDOP = 10, // always wait 10 seconds after getting fix, THEN set the time
+        .setRTCTime = true,
+        .blinkLeds = true,
+        .debug = (TRACKER_MODE == MODE_TESTRUN) };
+    get_fix_result_t fixResult = gps.tryToGetFix(&gpsData, &gpsConfig, &device);
+    if(fixResult == GPS_FIX_SUCCESS_AND_RTC_UPDATED) {
         hasValidTimestamp = true;
         setNextDataTransmissionTimestamp(false, gpsData.parent.utcTimestamp, DATATRANSM_TRY_EVERY_FULL_MINUTE_FREQUENTLY); // IMPORTANT: set here, so that after (re)start not immediately try to transmit data again
         if(isActivated) {
@@ -739,6 +745,7 @@ void imuDeepSleepTrackingMode() {
             espNowForceTrackingOnce = false; // if this was set before 
         }*/
         else {
+            if(DO_THE_BLINK) { device.ledGreenOn(); }
             // reserve some memory for flash (0ms)
             if(!device.flash.createBuffer(&sensorData, 100)) { lastErrorId = 18; errorCnt++; }
             // start bme measurement (7ms)
@@ -767,9 +774,9 @@ void imuDeepSleepTrackingMode() {
             device.imu.getTemperatureRaw(temperatureBmxRaw);
             temperatureBmx = device.imu.toCelsiusx100(temperatureBmxRaw);
             // get rtc timestamp (1ms)
-            uint32_t timestamp = device.rtc.getTimestamp(error);
-            uint8_t milliseconds = device.rtc.get100thOfSeconds(error);
-            if(error) { lastErrorId = 23; errorCnt++; }
+            uint32_t timestamp = 0;
+            uint8_t milliseconds = 0;
+            if(!device.rtc.getTimestamp(&timestamp, &milliseconds)) { lastErrorId = 23; errorCnt++; }
             // get bme data (1ms)
             if(bmeOk) {
                 if(device.baro.getResults()) {
@@ -834,6 +841,7 @@ void imuDeepSleepTrackingMode() {
             if(TRACKER_MODE == MODE_TESTRUN) { printf("%d Flash: FIFO space left after storing: %d\n", ((uint32_t) Timing::millis()), device.flash.fifoGetFreeSpace(flashBlockDeletedPointer, flashPointer, flashOffsetPointer, MT29_NUMBER_PAGES)); }
             timeNow = ((uint32_t) Timing::millis()) - timeNow;
             if(TRACKER_MODE == MODE_TESTRUN) { printf("%d Flash: storage took: %dms\n", ((uint32_t) Timing::millis()), timeNow); }
+            if(DO_THE_BLINK) { device.ledGreenOff(); }
             if(writeStatus == MT29_SEQ_WRITE_STATUS_MEMORY_FULL) { // flash fifo is full -> go into special WIFI TRANSMISSION MODE!
                 if(TRACKER_MODE == MODE_TESTRUN) { printf("%d Flash: FIFO full, stop IMU -> go into ST_MEMFULL state in 5 seconds\n", ((uint32_t) Timing::millis())); }
                 stopIMU();
@@ -891,10 +899,9 @@ uint16_t imuAnd1HzGPSTrackingModeHeaderLength() {
 }
 
 void imuAnd1HzGPSTrackingModeAddData(esp_gps_t *gpsData, uint16_t currentFifoLen, uint8_t *buffer, uint16_t *bufferPointer) {
-    bool error = false;
-    uint32_t timestamp = device.rtc.getTimestamp(error);
-    uint8_t milliseconds = device.rtc.get100thOfSeconds(error);
-    if(error) { lastErrorId = 149; errorCnt++; }
+    uint32_t timestamp = 0;
+    uint8_t milliseconds = 0;
+    if(!device.rtc.getTimestamp(&timestamp, &milliseconds)) { lastErrorId = 149; errorCnt++; }
     float temp = gpsData->parent.dop_h * 10.0;
     if(temp > 255.) temp = 255.;
     uint8_t hdopTimesTen = temp;
@@ -906,6 +913,12 @@ void imuAnd1HzGPSTrackingModeAddData(esp_gps_t *gpsData, uint16_t currentFifoLen
     uint16_t temperatureBmxRaw = 0;
     uint32_t pressure = 0;
     uint32_t humidity = 0;
+
+    if(gpsData->parent.fix == 0) { // set values to zero in case GPS fix is not valid
+        hdopTimesTen = 0;
+        latTimes1Mil = 0;
+        lonTimes1Mil = 0;
+    }
 
     if(!device.imu.getTemperatureRaw(temperatureBmxRaw)) { lastErrorId = 158; errorCnt++; }
     temperatureBmx = device.imu.toCelsiusx100(temperatureBmxRaw);
@@ -935,19 +948,21 @@ void imuAnd1HzGPSTrackingModeAddData(esp_gps_t *gpsData, uint16_t currentFifoLen
     HelperBits::addData4_AndIncrementPointer(pressure, buffer, bufferPointer);
     HelperBits::addData2Signed_AndIncrementPointer(temperatureBmx, buffer, bufferPointer);
     HelperBits::addData2_AndIncrementPointer(currentFifoLen, buffer, bufferPointer);
-    if(TRACKER_MODE == MODE_TESTRUN) { printf("%d FIFO: UTC %d.%03d, LAT %d, LON %d, HDOP %d, TEMP %d/%d, PRESS %d, HUM %d\n", ((uint32_t) Timing::millis()), timestamp, milliseconds, latTimes1Mil, lonTimes1Mil, hdopTimesTen, temperature, temperatureBmx, pressure, humidity); }  
+    if(TRACKER_MODE == MODE_TESTRUN) { printf("%d FIFO: UTC %d.%03d, LAT %d, LON %d, HDOP %d, TEMP %d/%d, PRESS %d, HUM %d\n", ((uint32_t) Timing::millis()), timestamp, ((uint16_t) milliseconds) * 10, latTimes1Mil, lonTimes1Mil, hdopTimesTen, temperature, temperatureBmx, pressure, humidity); }  
 }
 
 void imuAnd1HzGPSTrackingMode() {
-    const uint16_t FIFO_DATA_LEN = 1024 * 8;
-    const uint8_t RUBBISH_MINIMUM_LENGTH_NMEA = 10; // 17
-    bool gotTimeAfterFix = false;
+    const uint16_t FIFO_DATA_LEN = (1024 + imuAnd1HzGPSTrackingModeHeaderLength()) * 16;
     bool keepTrackingRunning = true;
-    uint8_t nmeaMessageCounter = 0;
+    bool updatedRTCInThisSession = false;
     int64_t ttffStartUs = 0;
     bool errorDuringInit = false;
+    get_uart_result_t res = GPS_UART_RESULT_SUCESS;
     uint16_t fifoDataPointer = 0;
-    uint16_t addExtraDelay = 0;
+    uint16_t fifoErrorLimit = 996; // if greater or equal than that, set error
+    bool couldUpdateTime = false;
+    uint16_t uartMillisWait = 0;
+    if((ACC_FREQUENCY == BMX160_ACCEL_ODR_50HZ) && USE_MAGNETOMETER && USE_GYRO) { fifoErrorLimit = 1001; } // exception because fifo sometimes 1000
 
     if(!espNowForceTrackingOnce) { espNowForceTrackingOnceCnt = 0; } // if this is a regular start: reset the counter
 
@@ -1021,7 +1036,8 @@ void imuAnd1HzGPSTrackingMode() {
             ttffStartUs = esp_timer_get_time(); // start timer
             gpsData.parent.ttfMilliseconds = 0;
             if(TRACKING_DATA_MODE_1HZ_GPS_FITNESS_LOW_POWER) {
-                if(!gps.setFLPMode2()) { errorDuringInit = true; }
+                // WARNING: DOES NOT WORK!!!
+                if(!gps.setFLPMode(false)) { errorDuringInit = true; }
             }
             if(!gps.setNMEAMessagesMinimum1HzWithZDA()) { errorDuringInit = true; }
             uart_flush(UART2_PORT_NUMBER);
@@ -1033,18 +1049,15 @@ void imuAnd1HzGPSTrackingMode() {
             size_t availableRam = heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT);
             if(TRACKER_MODE == MODE_TESTRUN) { printf("1HzGPS: enter, available RAM: %d\n", availableRam); }
 
-            uint8_t *uart2Data = (uint8_t*) malloc(UART2_RX_BUFFER);
-            if(uart2Data == NULL) { errorDuringInit = true; }
-
             uint8_t *fifoData = (uint8_t*) malloc(FIFO_DATA_LEN);
             if(fifoData == NULL) { errorDuringInit = true; }
 
             // NEW: initalize barometer
             if(!device.baro.init(BME680_OS_8X, BME680_OS_2X, BME680_OS_4X, BME680_FILTER_SIZE_3, 0, 0)) { lastErrorId = 117; errorCnt++; } // 4ms
 
-            if(errorDuringInit) { // SHOULD NOT HAPPEN, but could happen if GPS is not connected -> sleep for FIRST_UNDER_VOLTAGE_SLEEP_TIME and try again afterwards 
+            if(errorDuringInit) { // SHOULD NOT HAPPEN, but could happen if GPS is not connected -> sleep for FIRST_UNDER_VOLTAGE_SLEEP_TIME and try again afterwards
+                if(TRACKER_MODE == MODE_TESTRUN) { printf("1HzGPS: ERROR DURING INIT, SLEEP\n"); }
                 lastErrorId = 128; errorCnt++;
-                free(uart2Data);
                 free(fifoData);
                 device.gpioBOff();
                 device.enableInternalTimerInterruptInDeepSleep(FIRST_UNDER_VOLTAGE_SLEEP_TIME);
@@ -1059,11 +1072,6 @@ void imuAnd1HzGPSTrackingMode() {
 
             while(keepTrackingRunning) {
                 // wake up
-                //uart_flush(UART2_PORT_NUMBER); // WHY??
-                nmeaMessageCounter = 0;
-                uart_event_t event;
-                size_t bufferedSize;
-
                 // turn on green LED
                 if(TRACKING_DATA_MODE_1HZ_GPS_BLINK && DO_THE_BLINK) {
                     if(gpsData.parent.fix > 0) { device.ledGreenOn(); }
@@ -1081,106 +1089,71 @@ void imuAnd1HzGPSTrackingMode() {
                     // WARNING: IMU keeps running here!
                 }
 
-                // wait until all uart messages arrived
-                while(true) {
-                    if(xQueueReceive(*(device.uart2GetQueue()), (void * )&event, 0)) {
-                        if(event.type == UART_PATTERN_DET) { // '\n' detected
-                            nmeaMessageCounter++;
-                            uart_get_buffered_data_len(UART2_PORT_NUMBER, &bufferedSize); // get length of message in UART buffer
-                            if((nmeaMessageCounter == 1) && (bufferedSize < RUBBISH_MINIMUM_LENGTH_NMEA)) { nmeaMessageCounter--; } // maybe \n in first 20 bytes of rubbish detected (happened) -> do not count as NMEA message
+                // wait until all uart messages are received (either stops after getting '\n' and having GPRMC and GPGGA or after 50ms when not receiving an event anymore)
+                res = gps.afterLightSleepWaitForGPRMCandGPGGA(&gpsData, &couldUpdateTime, &uartMillisWait, false); // no debug
+                if(res != GPS_UART_RESULT_SUCESS) {
+                    lastErrorId = 174 + res; errorCnt++; // 175 - 180, next free: 181
+                    if((res == GPS_UART_RESULT_INIT_ERROR) || (res == GPS_UART_RESULT_BUFF_OVERFLOW_ERROR)) { // fatal errors, stop for some time
+                        device.enableInternalTimerInterruptInDeepSleep(15); // sleep for 15s
+                        keepTrackingRunning = false;
+                        break;
+                        // WARNING: IMU keeps running here!
+                    }
+                }
 
-                            if(nmeaMessageCounter >= 3) {
-                                bzero(uart2Data, UART2_RX_BUFFER); // write all zeros into buffer
-                                int readLen = uart_read_bytes(UART2_PORT_NUMBER, uart2Data, bufferedSize, 100 / portTICK_PERIOD_MS); // pos + 1 to also read the pattern itself (\n)
-                                if(readLen > 0) { // string looks like this: "???????,,,,0.00,0.00,050180,,,N*4C\r\n$GPRMC,000150.800,V,,,,,0.00,0.00,050180,,,N*4D\r\n$GPGGA,000225.800,,,,,0,0,,,M,,M,,*45\r\n" -> ~20 characters lost at start (@115200)
-                                    uart2Data[readLen] = '\0'; // make sure the line is a standard string
-                                    for(uint16_t a = 0; a < readLen; a++) {
-                                        if(uart2Data[a] == '\0') { uart2Data[a] = 'X'; } // make sure that rubbish at start does not include string termination
-                                    }
-                                    //for(uint8_t rubbish = 0; rubbish < RUBBISH_LENGTH_AFTER_LIGHT_SLEEP; rubbish++) { uart2Data[rubbish] = 'X'; } // instead of rubbish that might include string terminations or line breaks, just add Xs
-                                    char *uart2DataChar = (char *) uart2Data;
-                                    //if(TRACKER_MODE == MODE_TESTRUN) { printf("1HzGPS: RAW: %s (%d)\n", uart2DataChar, bufferedSize); } // WARNING: CREATES TIME DELAY WHEN SYNCHRONIZING RTC
-                                    
-                                    // extract complete $GP messages
-                                    bool foundRealStart = false;
-                                    char *validPart = strchr(uart2DataChar, '$'); // substring: first start of $
-                                    while(!foundRealStart) {
-                                        if(validPart == NULL) { break; } // no more '$' in string
-                                        else {
-                                            if(strlen(validPart) < 5) { break; } // should be an error
-                                            else {
-                                                if(strncmp("$GP", validPart, 3) == 0) { foundRealStart = true; break; } // first time that after $ comes valid GPS message -> stop
-                                                else { validPart = strchr(validPart + 1, '$'); } // + 1 because pointing on next char value
-                                            }
-                                        }
-                                    }
-                                    if(validPart != NULL) {
-                                        if(foundRealStart) {
-                                            uint16_t numberFullNMEAs = 0;
-                                            char *temp = validPart;
-                                            for(numberFullNMEAs=0; temp[numberFullNMEAs]; temp[numberFullNMEAs]=='$' ? numberFullNMEAs++ : *temp++);
-                                            if(numberFullNMEAs != 2) {
-                                                lastErrorId = 5; errorCnt++;
-                                                if(TRACKER_MODE == MODE_TESTRUN) { printf("1HzGPS: WARNING: received %d msgs!\n", numberFullNMEAs); } // WARNING: CREATES TIME DELAY WHEN SYNCHRONIZING RTC
-                                            }
-                                            if(strncmp("$GPRMC", validPart, 6) != 0) { // first message (after corrupted ZDA) should be GPRMC
-                                                // HAPPENS sometimes, mixed order (RMC, GGA, ZDA) but next time it's normal again, 500ms delay seems good
-                                                lastErrorId = 6; errorCnt++;
-                                                if(TRACKER_MODE == MODE_TESTRUN) { printf("1HzGPS: WARNING: rmc not first msg -> wait 500ms!\n"); } // WARNING: CREATES TIME DELAY WHEN SYNCHRONIZING RTC
-                                                addExtraDelay = 500;
-                                            }
-                                            if(TRACKER_MODE == MODE_TESTRUN) { printf("1HzGPS: valid: %s", validPart); }  // WARNING: CREATES TIME DELAY WHEN SYNCHRONIZING RTC
-                                            get_decode_result_t decodeRes = gps.gpsDecodeLine(&gpsData, validPart, readLen + 1);
-                                            if(decodeRes == GPS_DECODE_RESULT_CRC_ERR) {
-                                                if(TRACKER_MODE == MODE_TESTRUN) { printf("1HzGPS: crc decode line error\n"); } // WARNING: CREATES TIME DELAY WHEN SYNCHRONIZING RTC
-                                                lastErrorId = 7; errorCnt++; 
-                                            }
-                                            else if(decodeRes == GPS_DECODE_RESULT_UNKNOWN_STATEMENT_ERR) {
-                                                if(TRACKER_MODE == MODE_TESTRUN) { printf("1HzGPS: unknown statement decode line error\n"); } // WARNING: CREATES TIME DELAY WHEN SYNCHRONIZING RTC
-                                                lastErrorId = 4; errorCnt++; 
-                                            }
-                                        }
-                                        else { lastErrorId = 8; errorCnt++; }
-                                    }
-                                    else { lastErrorId = 13; errorCnt++; }
-
-                                    // calculate timestamp
-                                    bool couldUpdateTime = gps.updateUTCTimestamp(&gpsData); // returns true if time could be set (means timestamp is valid)
-
-                                    // check if got a valid time for the first time
-                                    if(couldUpdateTime
-                                        && (!gotTimeAfterFix)
-                                        && ((gpsData.parent.fix > 0) || (!hasValidTimestamp))) { // first time getting a valid GPS time! (only executed once) -> ONLY AFTER GETTING A FIX (or if hasValidTimestamp is not set yet)
-                                        // --- BE QUICK HERE ---
-                                        gotTimeAfterFix = true;
-                                        
-                                        // delay from UART: (max. 2 * 80 Byte*(8+2) * (1 / 115200 = 0.00868ms/bit) = 13.88ms)
-                                        validTimeTimerFinished = false;
-
-                                        // start timer
-                                        uint32_t waitTimeUs = gpsData.parent.tim.thousand;
-                                        // TODO: add estimateUARTSendTimeMs
-                                        waitTimeUs = (1000 - waitTimeUs) * 1000;
-                                        if(waitTimeUs == 0) { waitTimeUs = 1; }
-                                        if(waitTimeUs > 900000) { waitTimeUs = 900000; } // WARNING: ADDING INACCURACY, but otherwise might take a second to wait -> GPS receiving gets fucked up
-                                        if(esp_timer_start_once(validTimeTimer, waitTimeUs) == ESP_OK) {
-                                            while(!validTimeTimerFinished) { ; } // busy waiting until full second
-                                            tmElements_t timeStruct;
-                                            breakTime(gpsData.parent.utcTimestamp + 1, timeStruct);
-                                            if(device.rtc.set(timeStruct.Hour, timeStruct.Minute, timeStruct.Second, timeStruct.Wday, timeStruct.Day, timeStruct.Month, timeStruct.Year)) {
-                                                hasValidTimestamp = true; // IMPORTANT: update global variable
-                                                if(TRACKER_MODE == MODE_TESTRUN) { printf("%d 1HzGPS: updated RTC to: %u -> %d:%d:%d (wait: %u ms)\n", ((uint32_t) Timing::millis()), gpsData.parent.utcTimestamp + 1, timeStruct.Hour, timeStruct.Minute, timeStruct.Second, (waitTimeUs/1000)); }    
-                                            }
-                                            else { lastErrorId = 129; errorCnt++; }
-                                        }
-                                    }
-                                    //if(TRACKER_MODE == MODE_TESTRUN) { printf("%d 1HzGPS: %llds: %d.%d.%d %d:%d:%d, LAT: %f, LON: %f, SATS: %d, HDOP: %.2f, FIX: %d\n", ((uint32_t) Timing::millis()), (esp_timer_get_time()-ttffStartUs)/1000000ULL, gpsData.parent.date.day, gpsData.parent.date.month, gpsData.parent.date.year, gpsData.parent.tim.hour, gpsData.parent.tim.minute, gpsData.parent.tim.second, gpsData.parent.latitude, gpsData.parent.longitude, gpsData.parent.sats_in_use, gpsData.parent.dop_h, gpsData.parent.fix); }
-                                }
-                                break; // go into light sleep
-                            }
+                // update RTC
+                if(couldUpdateTime
+                    && (!updatedRTCInThisSession)
+                    && ((gpsData.parent.fix > 0) || (!hasValidTimestamp))) { // first time getting a valid GPS time! (only executed once) -> ONLY AFTER GETTING A FIX (or if hasValidTimestamp is not set yet)
+                    // --- BE QUICK HERE ---
+                    updatedRTCInThisSession = true;
+                    // TODO: add estimateUARTSendTimeMs
+                    // delay from UART: (max. 2 * 80 Byte*(8+2) * (1 / 115200 = 0.00868ms/bit) = 13.88ms)
+                    validTimeTimerFinished = false;
+                    // if debugging: get current milliseconds to compare
+                    uint8_t seconds100thOld = 0;
+                    uint16_t millisecondsOld = 0;
+                    uint32_t timestampOld = 0;
+                    if(TRACKER_MODE == MODE_TESTRUN) {
+                        device.rtc.getTimestamp(&timestampOld, &seconds100thOld);
+                        millisecondsOld = seconds100thOld * 10;
+                    }
+                    // start timer
+                    tmElements_t timeStruct;
+                    bool waitingError = false;
+                    uint32_t waitTimeUs = gpsData.parent.tim.thousand;
+                    waitTimeUs = (1000 - waitTimeUs) * 1000;
+                    if(waitTimeUs == 0) { waitTimeUs = 1; } // should not happen, but just in case
+                    //if(waitTimeUs > 900000) { waitTimeUs = 900000; } // WARNING: ADDING INACCURACY, but otherwise might take a second to wait -> GPS receiving gets fucked up
+                    if(waitTimeUs == 1000000) { // 1 full second to wait (milliseconds of GPS = 0) -> don't wait
+                        breakTime(gpsData.parent.utcTimestamp, timeStruct); // use THIS second
+                        waitTimeUs = 0;
+                    }
+                    else {
+                        if(esp_timer_start_once(validTimeTimer, waitTimeUs) == ESP_OK) {
+                            while(!validTimeTimerFinished) { ; } // busy waiting until full second
+                            breakTime(gpsData.parent.utcTimestamp + 1, timeStruct);
                         }
-                    }        
-                } // finished with getting gps data
+                        else { waitingError = true; }
+                    }
+                    if(!waitingError) {
+                        if(device.rtc.set(timeStruct.Hour, timeStruct.Minute, timeStruct.Second, timeStruct.Wday, timeStruct.Day, timeStruct.Month, timeStruct.Year)) {
+                            hasValidTimestamp = true; // IMPORTANT: update global variable
+                            if(TRACKER_MODE == MODE_TESTRUN) { printf("1HzGPS: updated RTC to: %u -> %d:%d:%d (wait: %u ms)\n", gpsData.parent.utcTimestamp + 1, timeStruct.Hour, timeStruct.Minute, timeStruct.Second, (waitTimeUs/1000)); }    
+                        }
+                        else { lastErrorId = 129; errorCnt++; }
+                    }
+                    else { lastErrorId = 160; errorCnt++; } // same error id as above
+                    if(TRACKER_MODE == MODE_TESTRUN) {
+                        int64_t timestampMsOld = timestampOld;
+                        timestampMsOld = (timestampMsOld * 1000) + millisecondsOld;
+                        int64_t timestampMsNow = gpsData.parent.utcTimestamp;
+                        timestampMsNow = (timestampMsNow * 1000) + gpsData.parent.tim.thousand;
+                        int64_t timestampDiff = timestampMsOld - timestampMsNow;
+                        printf("1HzGPS: RTC update: time diff %lld, %lld -> %lld\n", timestampDiff, timestampMsOld, timestampMsNow);
+                        printf("1HzGPS: RTC update: %d:%d:%d (wait: %u ms)\n", timeStruct.Hour, timeStruct.Minute, timeStruct.Second, (waitTimeUs/1000));
+                    }                                       
+                }
                 
                 // read voltage
                 uint16_t voltage = device.readSupplyVoltage();
@@ -1215,9 +1188,9 @@ void imuAnd1HzGPSTrackingMode() {
                         // read acc data into fifoData
                         if(currentFifoLen > 0) {
                             readFifoIMU(fifoData+fifoDataPointer, currentFifoLen);
-                            if(currentFifoLen >= 996) { lastErrorId = 61; errorCnt++; } // data loss possible
+                            if(currentFifoLen >= fifoErrorLimit) { lastErrorId = 61; errorCnt++; } // data loss possible
                             fifoDataPointer += currentFifoLen;
-                            if(TRACKER_MODE == MODE_TESTRUN) { printf("%d FIFO: pnt %d -> %d (MAX %d), %d acc bytes in %lldms\n", ((uint32_t) Timing::millis()), fifoDataPointerOld, fifoDataPointer, FIFO_DATA_LEN, currentFifoLen, (Timing::millis() - t)); }
+                            if(TRACKER_MODE == MODE_TESTRUN) { printf("%d FIFO: pnt %d -> %d (MAX %d, STACK %d), %d acc bytes in %lldms\n", ((uint32_t) Timing::millis()), fifoDataPointerOld, fifoDataPointer, FIFO_DATA_LEN, uxTaskGetStackHighWaterMark(NULL), currentFifoLen, (Timing::millis() - t)); }
                         }
                     }
                     else { // no more space in RAM light sleep memory -> store RAM + newest data from FIFO into flash
@@ -1232,7 +1205,7 @@ void imuAnd1HzGPSTrackingMode() {
                         // read acc data into fifoDataNewest
                         if(currentFifoLen > 0) {
                             readFifoIMU(fifoDataNewest+fifoDataNewestPointer, currentFifoLen);
-                            if(currentFifoLen >= 996) { lastErrorId = 65; errorCnt++; } // data loss possible
+                            if(currentFifoLen >= fifoErrorLimit) { lastErrorId = 65; errorCnt++; } // data loss possible
                             fifoDataNewestPointer += currentFifoLen;
                             if(TRACKER_MODE == MODE_TESTRUN) { printf("%d FIFO: fifonewest pnt %d (MAX 1024), read %d acc bytes in %lldms\n", ((uint32_t) Timing::millis()), fifoDataNewestPointer, currentFifoLen, (Timing::millis() - t)); }
                         }
@@ -1316,7 +1289,7 @@ void imuAnd1HzGPSTrackingMode() {
                     }
                 }
                 if(TRACKER_MODE == MODE_TESTRUN) { printf("\n"); }
-                if(addExtraDelay > 0) { device.delay(addExtraDelay); addExtraDelay = 0; } // in case of unsynced GPS messages
+                //if(addExtraDelay > 0) { device.delay(addExtraDelay); addExtraDelay = 0; } // in case of unsynced GPS messages
                 if(TRACKING_DATA_MODE_1HZ_GPS_BLINK && DO_THE_BLINK) { device.ledGreenOff(); device.ledRedOff(); }
                 if(!device.baro.performMeasurement()) { lastErrorId = 148; errorCnt++; } // 3ms, trigger baro measurement (takes around 31 ms from here, so do it before entering light sleep)
                 uart_flush(UART2_PORT_NUMBER);
@@ -1325,7 +1298,6 @@ void imuAnd1HzGPSTrackingMode() {
                 device.lightSleep();
             }
             // end of big while loop
-            free(uart2Data);
             free(fifoData);
             device.gpioBOff();
             if(TRACKING_DATA_MODE_1HZ_GPS_BLINK && DO_THE_BLINK) { device.ledGreenOff(); device.ledRedOff(); }
@@ -1339,10 +1311,9 @@ uint16_t imuLightSleepTrackingModeHeaderLength() {
 }
 
 void imuLightSleepTrackingModeAddData(uint16_t voltage, uint16_t currentFifoLen, uint8_t *buffer, uint16_t *bufferPointer) { 
-    bool error = false;
-    uint32_t timestamp = device.rtc.getTimestamp(error);
-    uint8_t milliseconds = device.rtc.get100thOfSeconds(error);
-    if(error) { lastErrorId = 149; errorCnt++; }
+    uint32_t timestamp = 0;
+    uint8_t milliseconds = 0;
+    if(!device.rtc.getTimestamp(&timestamp, &milliseconds)) { lastErrorId = 149; errorCnt++; }
     int16_t temperature = 0, temperatureBmx;
     uint16_t temperatureBmxRaw = 0;
     uint32_t pressure = 0;
@@ -1604,51 +1575,34 @@ void imuLightSleepTrackingMode() {
     }
 }
 
-void gpsCheckAliveAndMaybeChangeBaudrate(bool debug) {
-    device.shortLightSleep(3000);
-    device.gpioBOn();   
-    device.uart2Init(115200);
-    gps.init(device.uart2GetQueue());
-    device.uart2EnablePatternInterrupt('\n');
-    if(gps.isStarted()) {
-        if(debug) { printf("gpsCheckAliveAndMaybeChangeBaudrate: GPS working on 115200\n"); }
-    }
-    else {
-        device.gpioBOff();
-        if(debug) { printf("gpsCheckAliveAndMaybeChangeBaudrate: GPS not answering on 115200 -> TRYING 9600\n"); }
-        device.delay(2000);
-        device.uart2UpdateBaudrate(9600);
-        device.gpioBOn(); // turn on again
-        if(gps.isStarted()) {
-            if(debug) { printf("gpsCheckAliveAndMaybeChangeBaudrate: GPS answering on 9600 -> CHANGE\n"); }
-            gps.permanentlySetBaudrate115200(); // waiting 2 seconds here
-            device.gpioBOff();
-            device.delay(2000);
-            device.uart2UpdateBaudrate(115200);
-            device.gpioBOn(); // turn on again
-            if(gps.isStarted()) {
-                if(debug) { printf("gpsCheckAliveAndMaybeChangeBaudrate: change success, talking on 115200 now\n"); }
-            }
-            else {
-                if(debug) { printf("gpsCheckAliveAndMaybeChangeBaudrate: FATAL, change did not work\n"); }
-            }
-        }
-        else {
-            if(debug) { printf("gpsCheckAliveAndMaybeChangeBaudrate: NOT ANSWERING ON 9600 OR 115200 -> NOT CONNECTED?\n"); }
-        }
-    }
-    device.gpioBOff();
+void gpsCheckAliveAndMaybeChangeBaudrateWrapper() {
+    gps.checkAliveAndMaybeChangeBaudrate(&device, true);
 }
 
 extern "C" void app_main() {
     while(1) {
         if((TRACKER_MODE == MODE_TESTRUN) || (TRACKER_MODE == MODE_PRODUCTIVE)) {
             if((TRACKER_MODE == MODE_TESTRUN) && (state != ST_TRACK)) { printf("-----\nState: %d\n", state); }
-            /** ---------------- VERY FIRST ENTRY POINT AFTER HARD RESET (RTC memory = reset), only executed ONCE, NEVER after Deepsleep! ---------------- */
-            if(state == ST_FIRST_START_HARD_RESET) { // custom wake stub not running -> no fifo
+            /** ---------------- BOOT STATE ---------------- */
+            if(state == ST_BOOT) { // not doing anything here!
+                esp_reset_reason_t resetReason = device.getLastResetReason();
+                if(resetReason != ESP_RST_POWERON) {
+                    lastErrorId = 161 + resetReason; errorCnt++; // check for brownouts, errorIds 161 - 171 (next free: 172)
+                } 
+                state = ST_SERIAL_MENUE;
+                device.enableInternalTimerInterruptInDeepSleep(BOOT_DELAY_SECONDS); // restart system into next state
+            }
+            /** ---------------- SERIAL MENUE STATE ---------------- */
+            else if(state == ST_SERIAL_MENUE) {
+                if(!device.serialMenue(true, NULL, NVS_FLASH_TAG_ACTIVATED_BY_WIFI, gpsCheckAliveAndMaybeChangeBaudrateWrapper)) { // WARNING: CPU clocked to 10 MHz
+                    state = ST_FIRST_START;
+                }
+                esp_sleep_enable_timer_wakeup(100000ULL); // 100ms
+            }
+            /** ---------------- FIRST START STATE ---------------- */
+            else if(state == ST_FIRST_START) { // custom wake stub not running -> no fifo
                 if(TRACKER_MODE == MODE_TESTRUN) { printf("Reset: HARD RESET!\n"); }
                 device.disableWakeStubNoBootIfVoltageLow(); // disable no boot if voltage low (do here, only needed once!)
-                if(DO_THE_BLINK) { device.blinkTimes(3, B_RED); }
 
                 // full RF calibration in case ESP NOW IS USED
                 #if TRANSMISSION_METHOD == TRANSMISSION_METHOD_ESP_NOW
@@ -1664,13 +1618,13 @@ extern "C" void app_main() {
                 i2c.begin(I2C_FREQ_HZ_400KHZ); // for setting RTC time
                 device.delay(10);
 
-                // RTC: get current timestamp
-                uint32_t timestamp = device.rtc.getTimestamp(error);
-                if(error) { lastErrorId = 41; errorCnt++; }
+                // RTC: get current timestamp (without millis)
+                uint32_t timestamp = 0;
+                if(!device.rtc.getTimestamp(&timestamp, NULL)) { lastErrorId = 41; errorCnt++; }
 
                 // check if GPS connected
                 if(TRACKING_DATA_MODE == TRACKING_DATA_MODE_1HZ_GPS_AND_IMU) {
-                    gpsCheckAliveAndMaybeChangeBaudrate(TRACKER_MODE == MODE_TESTRUN);
+                    gps.checkAliveAndMaybeChangeBaudrate(&device, TRACKER_MODE == MODE_TESTRUN);
                 }
 
                 // check NVS if already activated & timestamp is valid, print write pointer also when in PRODUCTIVE
@@ -1705,8 +1659,18 @@ extern "C" void app_main() {
 
                 bool timeIsValid = device.rtc.timeIsValidNoUndervoltage(error);
                 if(error) { lastErrorId = 159; errorCnt++; }
-                if((timestamp > 1600000000) && timeIsValid) { hasValidTimestamp = true; }
-                if(TRACKER_MODE == MODE_TESTRUN) { printf("Reset: timestamp %u, timeValid %d -> hasValidTimestamp %d\n", timestamp, timeIsValid, hasValidTimestamp); }
+                if((timestamp > 1628689096) && timeIsValid) { hasValidTimestamp = true; }
+                else {
+                    hasValidTimestamp = false;
+                    if(!device.rtc.set(0, 0, 0, 0, 1, 1, 2000))  { lastErrorId = 173; errorCnt++; } // resetting time
+                    device.delay(20);
+                    if(!device.rtc.getTimestamp(&timestamp, NULL)) { lastErrorId = 174; errorCnt++; } // update timestamp
+                }
+                if(TRACKER_MODE == MODE_TESTRUN) {
+                    tmElements_t timeStruct;
+                    breakTime(timestamp, timeStruct);
+                    printf("Reset: timestamp %u (%02d:%02d:%02d, %02d.%02d.%d), voltageOk %d -> hasValidTimestamp %d\n", timestamp, timeStruct.Hour, timeStruct.Minute, timeStruct.Second, timeStruct.Day, timeStruct.Month, timeStruct.Year, timeIsValid, hasValidTimestamp);
+                }
                 
                 if(hasValidTimestamp || SKIP_GET_TIME) { // some brownout or other reset of MCU -> time still ok
                     setNextDataTransmissionTimestamp(false, timestamp, DATATRANSM_TRY_EVERY_FULL_MINUTE_FREQUENTLY); // IMPORTANT: set here, so that after (re)start not immediately try to transmit data again
@@ -2155,8 +2119,8 @@ extern "C" void app_main() {
                     #if defined(TRANSMISSION_METHOD_ESP_NOW) || defined(TRANSMISSION_METHOD_WIFI)
                     // get rtc timestamp (1ms)
                     i2c.begin(I2C_FREQ_HZ_400KHZ);
-                    uint32_t timestamp = device.rtc.getTimestamp(error);
-                    if(error) { lastErrorId = 9; errorCnt++; }
+                    uint32_t timestamp = 0;
+                    if(!device.rtc.getTimestamp(&timestamp, NULL)) { lastErrorId = 9; errorCnt++; }
                     if(TRACKER_MODE == MODE_TESTRUN) { printf("State: TIMESTAMP: %d\n", timestamp); }
                     // get pointers from NVS (15ms)
                     if(!device.initDataNVS()) { lastErrorId = 11; errorCnt++; }
@@ -2225,7 +2189,7 @@ extern "C" void app_main() {
                             else { memFullWakeUpOnMinute = ST_MEMFULL_TRY_EVERY_FULL_MINUTE_SELDOMLY; }
                             if(TRACKER_MODE == MODE_TESTRUN) { printf("State: nothing transmitted this time -> wake up more seldomly\n"); }
                         }
-                        timestamp = device.rtc.getTimestamp(error); // get RTC timestamp AGAIN because after data transmission it might be totally different
+                        device.rtc.getTimestamp(&timestamp, NULL);
                         uint32_t sleepyTime = calculateMemoryFullSleepTime(timestamp, memFullWakeUpOnMinute); 
 
                         device.enableInternalTimerInterruptInDeepSleep(sleepyTime); // sleep some time before trying again transmission
@@ -2313,11 +2277,8 @@ extern "C" void app_main() {
         }
         else { // not in productive or test run
             if(TRACKER_MODE == MODE_SELFTEST) {
-                if(device.selfTest(SELFTEST_VOLTAGE_REF, SELFTEST_PARAMETERS)) {
-                    #if SELFTEST_GPS_SET_BAUDRATE_PERMANTENLY == true
-                        gpsCheckAliveAndMaybeChangeBaudrate(true);
-                    #endif 
-                }
+                device.serialMenue(true, NULL, NVS_FLASH_TAG_ACTIVATED_BY_WIFI, gpsCheckAliveAndMaybeChangeBaudrateWrapper); // WARNING: CPU clocked to 10 MHz
+                esp_sleep_enable_timer_wakeup(1000000ULL); // nothing pressed -> sleep for 1 second
             }
             else if(TRACKER_MODE == MODE_READFLASH) { printf("Mode: READ FLASH\n"); readFullFlash(); }
             else if(TRACKER_MODE == MODE_MOCK_FLASH_STATE) { printf("Mode: MOCK FLASH STATE\n"); mockFlashState(); }

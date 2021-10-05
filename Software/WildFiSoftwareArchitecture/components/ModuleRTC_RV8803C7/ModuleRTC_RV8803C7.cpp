@@ -15,9 +15,16 @@ bool RTC_RV8803C7::timeIsValidNoUndervoltage(bool &error) {
 		// reset the flag (is always set after POR)
 		reg_flag = HelperBits::setBit(reg_flag, REG8803_FLAG_V1F, 0);
 		reg_flag = HelperBits::setBit(reg_flag, REG8803_FLAG_V2F, 0);
-		error |= !i2c.writeRegister(RTC_RV8803C7_ADDRESS, REG8803_FLAG, reg_flag); // 0x0F: UIE = 0 (disable interrupts shortly)
+		error |= !i2c.writeRegister(RTC_RV8803C7_ADDRESS, REG8803_FLAG, reg_flag);
+
+		// new: set time to "0", otherwise after restart might clear under voltage but when resetting it is okay again
+		set(0, 0, 0, 0, 1, 1, 2004);
 	}
 	return timeValid;
+}
+
+bool RTC_RV8803C7::setSeconds(uint8_t seconds) {
+	return i2c.writeRegister(RTC_RV8803C7_ADDRESS, REG8803_SECONDS, HelperBits::intToBCD(seconds));
 }
 
 bool RTC_RV8803C7::set(uint8_t hours, uint8_t minutes, uint8_t seconds, uint8_t weekday, uint8_t date, uint8_t month, uint16_t year) {
@@ -46,7 +53,36 @@ bool RTC_RV8803C7::set(uint8_t hours, uint8_t minutes, uint8_t seconds, uint8_t 
 	return i2c.writeRegisterBase(RTC_RV8803C7_ADDRESS, REG8803_SECONDS, vals, LEN);
 }
 
-uint32_t RTC_RV8803C7::getTimestamp(bool &error) {
+bool RTC_RV8803C7::getTimestamp(uint32_t *timestamp, uint8_t *hundreds) {
+	bool error = false;
+	if(timestamp == NULL) { return false; }
+	*timestamp = getTimestampInternal(error); // will re-read second time when seconds = 59
+	if(error) {
+		*timestamp = 0;
+		*hundreds = 0;
+		return false;
+	}
+	if(hundreds != NULL) {
+		*hundreds = get100thOfSeconds(error);
+		if(error) {
+			*timestamp = 0;
+			*hundreds = 0;
+			return false;
+		}
+		// happens sometimes: millis already 0, but rest not updated -> re-read timestamp
+		if(*hundreds == 0) { 
+			*timestamp = getTimestampInternal(error); // will re-read second time when seconds = 59
+			if(error) {
+				*timestamp = 0;
+				*hundreds = 0;
+				return false;
+			}
+		}
+	}	
+	return true;
+}
+
+uint32_t RTC_RV8803C7::getTimestampInternal(bool &error) {
 	uint8_t seconds, minutes, hours, day, month, yearWithout2000;
 	uint16_t yearWith2000;
 	const uint8_t LEN = 7;
@@ -83,7 +119,7 @@ uint32_t RTC_RV8803C7::getTimestamp(bool &error) {
 		// otherwise: still 59 -> first data is valid
 	}
 	if(day == 0) { day = 1; } // RESET value is 0 (but month is 1)
-	if(yearWith2000 == 2000) { yearWith2000 = 1970; } // RESET value is 0 + 2000 = 2000 -> timestamp starts in 2000, better start in 1970
+	//if(yearWith2000 == 2000) { yearWith2000 = 1970; } // RESET value is 0 + 2000 = 2000 -> timestamp starts in 2000, better start in 1970
 	uint32_t timestamp = _UNIX_TIMESTAMP(yearWith2000, month, day, hours, minutes, seconds);
 	return timestamp;
 }
@@ -116,6 +152,17 @@ uint16_t RTC_RV8803C7::getYear(bool &error) {
 
 uint8_t RTC_RV8803C7::get100thOfSeconds(bool &error) {
 	return HelperBits::BCDToInt(i2c.readRegister(RTC_RV8803C7_ADDRESS, REG8803_100TH_SECONDS, error));
+}
+
+bool RTC_RV8803C7::timeUpdateInterruptMinuteChangeHappened(bool &error) {
+	bool happened = i2c.readRegisterBit(RTC_RV8803C7_ADDRESS, REG8803_FLAG, REG8803_FLAG_UF, error);
+	if(happened) { // reset when happened
+		uint8_t reg_flag = i2c.readRegister(RTC_RV8803C7_ADDRESS, REG8803_FLAG, error);
+		if(error) { return false; }
+		reg_flag = HelperBits::setBit(reg_flag, REG8803_FLAG_UF, 0); // UF = 0 (clear setTimeUpdateInterruptMinuteChange interrupt)
+		return i2c.writeRegister(RTC_RV8803C7_ADDRESS, REG8803_FLAG, reg_flag);
+	}
+	return happened;
 }
 
 bool RTC_RV8803C7::setTimeUpdateInterruptMinuteChange() {

@@ -21,6 +21,10 @@ public class ProxEntry {
         return "nobody,nobody";
     }
 
+    public static String serializeEmpty() {
+        return "-,-";
+    }
+
     public static void createProxData(String vardata, long utcTimestamp, ArrayList<ProxEntry> proxEntries) {
         int len = vardata.length();
         for(int i=0; i<(len/6); i++) {

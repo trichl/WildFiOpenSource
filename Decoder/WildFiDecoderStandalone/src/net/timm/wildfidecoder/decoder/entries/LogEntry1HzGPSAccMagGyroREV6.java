@@ -48,7 +48,7 @@ public class LogEntry1HzGPSAccMagGyroREV6 extends LogEntry {
 
         fifoLen = Long.parseLong(dataset.substring(INDEX(30), INDEX(32)), 16);
 
-        if (!LogEntryManager.timestampPlausible(utcTimestamp, debug)) plausibilityCheckOkay = false;
+        //if (!LogEntryManager.timestampPlausible(utcTimestamp, debug)) plausibilityCheckOkay = false; // NO, because maybe starting without time
         if (!LogEntryManager.fifoLenPlausible(fifoLen, debug)) plausibilityCheckOkay = false;
 
         String fifoDataExtracted = "";

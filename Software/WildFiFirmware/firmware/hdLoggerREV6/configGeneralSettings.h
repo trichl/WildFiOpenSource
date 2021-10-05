@@ -2,11 +2,13 @@
 #define configGeneralSettings_h
 
 /** -------- ACTUAL CONFIGURATION (NORMALLY NOT CHANGED BETWEEN PROJECTS) --------  */
-#define WILDFI_SOFTWARE_VERSION                         31
+#define WILDFI_SOFTWARE_VERSION                         41
 
 /** Force download WIFI Configuration (immediately after wake-up, during time wifi scan, enter special mode to download all data and then sleep forever) */
 const char* FORCE_DOWNLOAD_WIFI_SSID =                  "mpiforce";                     // mpidownload, enter special mode during get time state when this wifi is seen
 const char* FORCE_DOWNLOAD_WIFI_PASSWORD =              "ABCDEFGH";                     // ABCDEFGH, enter special mode during get time state when this wifi is seen
+
+#define BOOT_DELAY_SECONDS                              5                               // 5, after initial start, wait this amount of seconds before entering next state (to give time for putting tag into housing and stuff)
 
 /** Connect to WIFI Configuration */
 #define WIFI_MAX_CONNECT_TIME_SECONDS                   8                               // (used for get time, activation and data transmission) connect should take <1s
@@ -66,7 +68,7 @@ const char* FORCE_DOWNLOAD_WIFI_PASSWORD =              "ABCDEFGH";             
     #define NVS_FLASH_SEND_NEXT_HALF_BLOCK_POINTER      "halfblocksent"                 // data transmission: sometimes only half a block transmitted -> save and do not retransmit
 
 /** State enums */
-typedef enum { ST_FIRST_START_HARD_RESET = 0, ST_GET_TIME = 1, ST_WAIT_FOR_ACTIVATION = 2, ST_START = 3, ST_TRACK = 4, ST_PWRDWN = 5, ST_MEMFULL = 6, ST_NIGHT_TIME = 7, ST_FORCE_DOWNLOAD = 8 } tracker_state_t;
+typedef enum { ST_BOOT = 0, ST_SERIAL_MENUE, ST_FIRST_START, ST_GET_TIME, ST_WAIT_FOR_ACTIVATION, ST_START, ST_TRACK, ST_PWRDWN, ST_MEMFULL, ST_NIGHT_TIME, ST_FORCE_DOWNLOAD } tracker_state_t;
 
 /** Transmission methods */
 #define TRANSMISSION_METHOD_ESP_NOW                     0                               // transmit data over esp now

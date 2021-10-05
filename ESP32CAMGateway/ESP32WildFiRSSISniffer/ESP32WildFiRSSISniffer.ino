@@ -14,11 +14,12 @@
 #include "soc/soc.h"           // disable brownout problems
 #include "soc/rtc_cntl_reg.h"  // disable brownout problems
 #include "driver/rtc_io.h"
+#include "WifiCredentials.h"
 
 /** ------ SETTINGS ------ */
 
-const char* ssid                                        = "RodelbahnSoelden";
-const char* password                                    = "xxxxxxxx";
+const char* ssid                                        = WIFI_SSID1;
+const char* password                                    = WIFI_PASSWORD1;
 const char* ntpServer                                   = "pool.ntp.org";
 
 /** ------ DEFINES & STRUCTS ------ */

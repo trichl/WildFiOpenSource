@@ -6,14 +6,14 @@ FLASH_MT29::FLASH_MT29() {
 
 uint32_t FLASH_MT29::fifoGetFreeSpace(uint16_t blocksErasedPointer, uint32_t currentPageAddress, uint16_t currentByteOffset, uint32_t fifoSizePages) {
 	// currentPageAddress = 0 .. 131071, currentByteOffset = 0 - 2047
-	// blocksErasedPointer = 0 .. 2047 -> if 0 then nothing erased yet
+	// blocksErasedPointer = 0 .. 2047 -> if 0 then nothing erased yet -> if 2048 then ERROR
 	uint32_t pagesErasedPointer = blocksErasedPointer * MT29_PAGES_PER_BLOCK;
 	uint32_t spaceLeft = 0;
 	if(currentPageAddress >= fifoSizePages) {
 		//printf("ERROR1\n");
 		return 0; // error
 	}
-	if(pagesErasedPointer > fifoSizePages) {
+	if(pagesErasedPointer >= fifoSizePages) { // 2048 
 		//printf("ERROR2\n");
 		return 0; // error
 	}
@@ -36,7 +36,7 @@ uint32_t FLASH_MT29::fifoGetFreeSpace(uint16_t blocksErasedPointer, uint32_t cur
 }
 
 sequential_write_status_t FLASH_MT29::fifoPushSimple(uint16_t blocksErasedPointer, uint32_t &pageAddressStart, uint16_t &byteOffsetStart, uint8_t *data, uint32_t dataLen, bool readBack, bool debug, uint16_t maxIterations, uint32_t fifoSizePages) {
-	uint16_t cpyPointer = 0; // current working pointer for data
+	uint32_t cpyPointer = 0; // current working pointer for data
 	uint16_t flashWriteIteration = 0; // for timeout in case of fatal software error (should not happen!)
 	uint16_t dmaBufferPointer = 0;
 	uint16_t spaceLeftInPage = 0;
@@ -45,7 +45,8 @@ sequential_write_status_t FLASH_MT29::fifoPushSimple(uint16_t blocksErasedPointe
 	uint8_t *dmaBuffer2048Bytes = NULL;
 	uint8_t *dmaReadBackBuffer2048Bytes = NULL;
 
-	if(dataLen > fifoGetFreeSpace(blocksErasedPointer, pageAddressStart, byteOffsetStart, fifoSizePages)) {
+	// IMPORTANT: if only ">" and just fits in memory -> wrap around of pointers to 0.0, then overwriting existing data! horror!
+	if(dataLen >= fifoGetFreeSpace(blocksErasedPointer, pageAddressStart, byteOffsetStart, fifoSizePages)) {
 		if(debug) { printf("MEMORY FULL, only %d Bytes left\n", fifoGetFreeSpace(blocksErasedPointer, pageAddressStart, byteOffsetStart, fifoSizePages)); }
 		return MT29_SEQ_WRITE_STATUS_MEMORY_FULL;
 	}
@@ -135,14 +136,15 @@ sequential_write_status_t FLASH_MT29::fifoPushSimple(uint16_t blocksErasedPointe
 
 sequential_write_status_t FLASH_MT29::fifoPush(uint16_t blocksErasedPointer, uint32_t &pageAddressStart, uint16_t &byteOffsetStart, uint8_t *data1, uint32_t dataLen1, uint8_t *data2, uint32_t dataLen2, uint8_t *data3, uint32_t dataLen3, bool debug, uint16_t maxIterations, uint32_t fifoSizePages) {
 	sequential_write_state_internal_t stateFlashCopy = MT29_COPY_DATA_1; // state, start with copying first dataset
-	uint16_t cpyPointer = 0; // current working pointer for data1, data2 or data3
+	uint32_t cpyPointer = 0; // current working pointer for data1, data2 or data3
 	uint16_t flashWriteIteration = 0; // for timeout in case of fatal software error (should not happen!)
 	uint16_t dmaBufferPointer = 0;
 	uint16_t spaceLeftInPage = 0;
 	bool errorHappened = false;
 	uint8_t *dmaBuffer2048Bytes = NULL;
 
-	if((dataLen1 + dataLen2 + dataLen3) > fifoGetFreeSpace(blocksErasedPointer, pageAddressStart, byteOffsetStart, fifoSizePages)) {
+	// IMPORTANT: if only ">" and just fits in memory -> wrap around of pointers to 0.0, then overwriting existing data! horror!
+	if((dataLen1 + dataLen2 + dataLen3) >= fifoGetFreeSpace(blocksErasedPointer, pageAddressStart, byteOffsetStart, fifoSizePages)) { 
 		if(debug) { printf("MEMORY FULL, only %d Bytes left\n", fifoGetFreeSpace(blocksErasedPointer, pageAddressStart, byteOffsetStart, fifoSizePages)); }
 		return MT29_SEQ_WRITE_STATUS_MEMORY_FULL;
 	}
@@ -218,7 +220,7 @@ sequential_write_status_t FLASH_MT29::fifoPush(uint16_t blocksErasedPointer, uin
 			}
 		}
 		
-		Timing::delay(1); // 1ms delay after writing
+		//Timing::delay(1); // 1ms delay after writing
 		// update the pointer (call by reference)
 		byteOffsetStart = byteOffsetStart + dmaBufferPointer;
 		if(byteOffsetStart >= MT29_CACHE_SIZE) { // when page would be full after write -> increase pageAddress
