@@ -4,6 +4,8 @@ Open source modular biologger with 2.4 GHz connectivity (BLE, WiFi, ESP NOW). Th
 # Pinout of the ESP32 Pico D4 and the extension ports
 ![ESP32PinoutV2](https://github.com/trichl/WildFiOpenSource/blob/main/Hardware/ESP32PinoutV2.png?raw=true)
 
+![WildFiTagREV6-Extension-Ports](https://github.com/trichl/WildFiOpenSource/blob/main/Hardware/WildFiTagREV6-Extension-Ports.png?raw=true)
+
 # Hardware Layouts
 * See sub folder Hardware
 * Designed with Autodesk Eagle 9.5.2
