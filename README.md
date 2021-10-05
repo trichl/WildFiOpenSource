@@ -30,18 +30,18 @@ Open source modular biologger with 2.4 GHz connectivity (BLE, WiFi, ESP NOW). Th
 
 # IDE for Software Development (Windows)
 * Visual Studio Code (>= 1.54.3) + PlatformIO (Core >= 5.1.1, Home >= 3.3.4)
-   * After installing the IDE the pre-configured project can be opened: [Software/WildFiFirmware](Software/WildFiFirmware)
+   * After installing the IDE the pre-configured project can be opened from: [Software/WildFiFirmware](Software/WildFiFirmware)
    * The sub folder [firmware](Software/WildFiFirmware/firmware) includes productive software
    * The sub folders [testREVX](Software/WildFiFirmware) include test software
    * The project is configured in [Software/WildFiFirmware/platformio.ini](Software/WildFiFirmware/platformio.ini) (the parameter src_dir selects the application that shall be compiled)
-* Or Eclipse (eclipse-cpp-2020-09-R-win32-x86_64) and idf-eclipse plugin (tutorial: https://github.com/espressif/idf-eclipse-plugin/blob/master/README.md), project stub with complete software architecture integration for Eclipse is located in [Software/WildFiSoftwareArchitecture](Software/WildFiSoftwareArchitecture)
-
-# Flashing the Firmware
 * After compilation (see above) three binary files are generated
   * bootloader.bin: the bootloader firmware
   * partitions.bin: includes the flash partition table for the ESP32
   * firmware.bin: includes the actual WildFi firmware
   * When using PlatformIO the files are automatically generated in [Software\WildFiFirmware\.pio\build\pico32]([Software\WildFiFirmware\.pio\build\pico32)
+* Alternative IDE: Eclipse (eclipse-cpp-2020-09-R-win32-x86_64) and idf-eclipse plugin (tutorial: https://github.com/espressif/idf-eclipse-plugin/blob/master/README.md), project stub with complete software architecture integration for Eclipse is located in [Software/WildFiSoftwareArchitecture](Software/WildFiSoftwareArchitecture)
+
+# Flashing the Firmware
 * To flash software on the ESP32, the WildFi tag needs to be attached to the [USB breakout board](Hardware/WildFiTagREV6-Extension-USB.sch) (red arrows indicate the programming board settings when no external battery is connected to the WildFi tag) und the USB connector to a computer (flashing is done via the UART bridge that is integrated on the USB breakout board):
 
 ![WildFiTagProgramming](https://github.com/trichl/WildFiOpenSource/blob/main/FlashDownloadTool/WildFiTagProgramming.jpg?raw=true)
