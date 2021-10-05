@@ -69,4 +69,4 @@ Open source modular biologger with 2.4 GHz connectivity (Bluetooth LE, WiFi, ESP
 
 # Attitude Estimator
 * Based on: https://github.com/AIS-Bonn/attitude_estimator
-* See license file in sub folder [AttitudeEstimator](AttitudeEstimator)
+* See license file in folder [Software/WildFiSoftwareArchitecture/components/PlatformAttitudeEstimator/](Software/WildFiSoftwareArchitecture/components/PlatformAttitudeEstimator/)
