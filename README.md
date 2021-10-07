@@ -27,7 +27,7 @@ Open source modular biologger with 2.4 GHz connectivity (Bluetooth LE, WiFi, ESP
 # Hardware Layouts
 * See sub folder [Hardware](Hardware)
 * Schematics (.sch) and boards (.brd) are designed in Autodesk Eagle 9.5.2
-* PCBs were produced and assembled by PCBWay (production-ready Gerber files and PCBWay settings in [Hardware/GerberProductionFiles](Hardware/GerberProductionFiles))
+* PCBs were produced and assembled by [PCBWay](https://www.pcbway.com) (production-ready Gerber files and PCBWay settings in [Hardware/GerberProductionFiles](Hardware/GerberProductionFiles))
 * [Hardware/WildFiTagREV6-Extension-Dummy.brd](Hardware/WildFiTagREV6-Extension-Dummy.brd) and [Hardware/WildFiTagREV6-Extension-Dummy.sch](Hardware/WildFiTagREV6-Extension-Dummy.sch) can be used for designing new extension boards (we recommend using [Hardware/GerberProductionFiles/CONFIGURATION/PCBWay_2_layer.cam](Hardware/GerberProductionFiles/CONFIGURATION/PCBWay_2_layer.cam) when generating new Gerber files in Eagle)
 
 # IDE for Software Development (Windows)
