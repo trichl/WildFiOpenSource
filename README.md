@@ -27,8 +27,8 @@ Open source modular biologger with 2.4 GHz connectivity (Bluetooth LE, WiFi, ESP
 # Battery and Solar Connector
 ![WildFiTagREV6Connectors](https://github.com/trichl/WildFiOpenSource/blob/main/Hardware/WildFiTagREV6Connectors.png?raw=true)
 
-* Socket: 2-pin SM02B-SURS-TF(LF)(SN)
-* Header:
+* Onboard connector type: JST SM02B-SURS-TF(LF)(SN)
+* Compatible wire connector (AWG #32, max. 500 mA, 150 mm): JST 02SUR-02SUR-32W150 
 
 # Hardware Layouts
 * See sub folder [Hardware](Hardware)
