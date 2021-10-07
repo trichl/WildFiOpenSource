@@ -24,6 +24,10 @@ Open source modular biologger with 2.4 GHz connectivity (Bluetooth LE, WiFi, ESP
 
 ![WildFiTagREV6-Extension-Ports](https://github.com/trichl/WildFiOpenSource/blob/main/Hardware/WildFiTagREV6-Extension-Ports.png?raw=true)
 
+# Battery and Solar Connector
+![WildFiTagREV6Connectors](https://github.com/trichl/WildFiOpenSource/blob/main/Hardware/WildFiTagREV6Connectors.png?raw=true)
+* 
+
 # Hardware Layouts
 * See sub folder [Hardware](Hardware)
 * Schematics (.sch) and boards (.brd) are designed in Autodesk Eagle 9.5.2
