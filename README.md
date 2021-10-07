@@ -24,11 +24,16 @@ Open source modular biologger with 2.4 GHz connectivity (Bluetooth LE, WiFi, ESP
 
 ![WildFiTagREV6-Extension-Ports](https://github.com/trichl/WildFiOpenSource/blob/main/Hardware/WildFiTagREV6-Extension-Ports.png?raw=true)
 
-# Battery and Solar Connector
+# Connecting Battery & Solar Panel (optional)
 ![WildFiTagREV6Connectors](https://github.com/trichl/WildFiOpenSource/blob/main/Hardware/WildFiTagREV6Connectors.png?raw=true)
 
 * Onboard connector type: JST SM02B-SURS-TF(LF)(SN)
-* Compatible wire connector (AWG #32, max. 500 mA, 150 mm): JST 02SUR-02SUR-32W150 
+* Compatible wire connector (AWG #32, max. 500 mA, 150 mm): JST 02SUR-02SUR-32W150
+* During radio initialisation the ESP32 requires a current peak of up to 500 mA
+ * It is recommended to use a lithium-polymer battery (LiPo) with at least 70 mAh capacity 
+ * Other battery types might be used as well (e.g., 18650)
+  * Minimum voltage: 3.3 V
+  * Maximum voltage: 5 V
 
 # Hardware Layouts
 * See sub folder [Hardware](Hardware)
