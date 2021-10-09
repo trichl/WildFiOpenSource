@@ -71,19 +71,20 @@ Open source modular biologger with 2.4 GHz connectivity (Bluetooth LE, WiFi, ESP
 
 * Software can be flashed via PlatformIO directly (PlatformIO automatically executes the following command: C:\\Users\\[username]\\.platformio\\packages\\tool-esptoolpy\\esptool.py --chip esp32 --port "COM99" --baud 460800 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 40m --flash_size detect 0x10000 .pio\\build\\pico32\\firmware.bin)
 * Or by using [FlashDownloadTool/esptool/esptool.py](FlashDownloadTool/esptool/esptool.py) directly (see above for flashing command)
- * Python needs to be installed (latest version)
+  * Python needs to be installed (latest version)
 * Or by using [FlashDownloadTool/flash_download_tool_3.8.5.exe](FlashDownloadTool/flash_download_tool_3.8.5.exe) with following settings:
 
 ![WildFiTagSettings](https://github.com/trichl/WildFiOpenSource/blob/main/FlashDownloadTool/WildFiTagSettings.png?raw=true)
 
-# ESP-IDF
+# ESP-IDF Software Framework
 * The ESP32 software is based on esp-idf-v4.1, see LICENSE file in [Software/esp-idf-customized](Software/esp-idf-customized)
 * The repository can be cloned from git: git clone -b v4.1 --recursive https://github.com/espressif/esp-idf.git esp-idf-v4.1
-* We implemented a slight modification of the ESP-IDF to make use of the full RTC RAM (see https://github.com/espressif/esp-idf/commit/ef10c2576ff14afa033ef22105406399abc570af). The custom esp-idf can be found under [Software/esp-idf-customized](Software/esp-idf-customized)
-* When using PlatformIO: copy content from [Software/esp-idf-customized](Software/esp-idf-customized) to C:\\Users\\[username]\\.platformio\\packages\\framework-espidf
+* We implemented a slight modification of the ESP-IDF to make use of the full RTC RAM (see https://github.com/espressif/esp-idf/commit/ef10c2576ff14afa033ef22105406399abc570af) 
+  * The custom esp-idf can be found under [Software/esp-idf-customized](Software/esp-idf-customized)
+  * When using PlatformIO: copy content from [Software/esp-idf-customized](Software/esp-idf-customized) to C:\\Users\\[username]\\.platformio\\packages\\framework-espidf
 
 # Efuse Settings (Optional)
-* First tag boot: flash voltage is set to 1.8V by MTDI pin (due to attached flash memory), leading to a flash error while booting and let the ESP32 perform a RTCWDT_RTC_RESET (no side effects)
+* First tag boot: flash voltage is set to 1.8V by MTDI pin (due to attached flash memory module), leading to a flash error while booting and let the ESP32 perform a RTCWDT_RTC_RESET (no side effects)
 * To fix: write flash voltage permanently to 3.3V (ignoring GPIO12 = MTDI pin): [FlashDownloadTool/esptool/espefuse.py](FlashDownloadTool/esptool/espefuse.py) --port COM99 set_flash_voltage 3.3V (python espefuse.py -p COM99 set_flash_voltage 3.3V), sdkconfig settings: Serial flasher config: DIO and 40 MHz
 * Python scripts require Python to be installed
 * Get esptool via Windows command line: pip install esptool
