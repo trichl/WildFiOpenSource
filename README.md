@@ -39,6 +39,9 @@ Open source modular biologger with 2.4 GHz connectivity (Bluetooth LE, WiFi, ESP
 * Onboard connector type: JST SM02B-SURS-TF(LF)(SN)
 * Compatible wire connector (AWG #32, max. 500 mA, 150 mm): JST 02SUR-02SUR-32W150
 * Supported solar cells: all types (polycrystalline, monocrystalline, triple-junction) with an open-circuit voltage between 0.55 and 4 V
+* The solar harvesting circuit is activated by closing the solder jumper on the backside of the WildFi tag:
+
+![WildFiTagREV6SolarJumper](https://github.com/trichl/WildFiOpenSource/blob/main/Hardware/Pictures/WildFiTagREV6SolarJumper.png?raw=true)
 
 # Hardware Layouts
 * See sub folder [Hardware](Hardware)
