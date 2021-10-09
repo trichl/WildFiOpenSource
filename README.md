@@ -1,9 +1,9 @@
-# WildFi biologger
+# WildFi Tag
 Open source modular biologger with 2.4 GHz connectivity (Bluetooth LE, WiFi, ESP NOW). This repository includes hardware design files of the WildFi tag and WildFi extension boards, embedded software, software architecture, software for the ESP32 CAM gateways, an Android app for remote data download, and decoding software.
 
 ![WildFiTagREV6](https://github.com/trichl/WildFiOpenSource/blob/main/Hardware/Pictures/WildFiTagREV6.png?raw=true)
 
-# Sensors and communication interfaces
+# Sensors and Communication Interfaces
 * The WildFi tag integrates an ESP32 Pico D4 microcontroller and following additional components:
   * 9-axis inertial measurement unit (Bosch BMX160)
   * 4-in-1 environment sensor (Bosch BME680)
@@ -19,7 +19,7 @@ Open source modular biologger with 2.4 GHz connectivity (Bluetooth LE, WiFi, ESP
   * 3 x GPIOs
   * 2 x power control lines (allowing for independent powering of sensors and memory modules)
 
-# Pinout of the ESP32 Pico D4 and the extension ports
+# Pinout of the ESP32 Pico D4 and the Extension Ports
 ![ESP32PinoutV2](https://github.com/trichl/WildFiOpenSource/blob/main/Hardware/Pictures/ESP32PinoutV2.png?raw=true)
 
 ![WildFiTagREV6-Extension-Ports](https://github.com/trichl/WildFiOpenSource/blob/main/Hardware/Pictures/WildFiTagREV6-Extension-Ports.png?raw=true)
@@ -35,7 +35,7 @@ Open source modular biologger with 2.4 GHz connectivity (Bluetooth LE, WiFi, ESP
   * Other battery types might be used as well (e.g., 18650)
     * Input voltage range of the WildFi tag: 3.3 - 5.0 V
 
-# Connecting Solar Panel (optional)
+# Connecting Solar Panel (Optional)
 * Onboard connector type: JST SM02B-SURS-TF(LF)(SN)
 * Compatible wire connector (AWG #32, max. 500 mA, 150 mm): JST 02SUR-02SUR-32W150
 * Supported solar cells: all types (polycrystalline, monocrystalline, triple-junction, photodiodes) with an open-circuit voltage between 0.55 and 4 V
