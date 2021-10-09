@@ -17,7 +17,7 @@ Open source modular biologger with 2.4 GHz connectivity (Bluetooth LE, WiFi, ESP
   * 1 x I2S
   * 1 x UART
   * 3 x GPIOs
-  * 2 x power control lines (allowing for independent powering of sensors and memory)
+  * 2 x power control lines (allowing for independent powering of sensors and memory modules)
 
 # Pinout of the ESP32 Pico D4 and the extension ports
 ![ESP32PinoutV2](https://github.com/trichl/WildFiOpenSource/blob/main/Hardware/Pictures/ESP32PinoutV2.png?raw=true)
@@ -38,7 +38,7 @@ Open source modular biologger with 2.4 GHz connectivity (Bluetooth LE, WiFi, ESP
 # Connecting Solar Panel (optional)
 * Onboard connector type: JST SM02B-SURS-TF(LF)(SN)
 * Compatible wire connector (AWG #32, max. 500 mA, 150 mm): JST 02SUR-02SUR-32W150
-* Supported solar cells: all types (polycrystalline, monocrystalline, triple-junction) with an open-circuit voltage between 0.55 and 4 V
+* Supported solar cells: all types (polycrystalline, monocrystalline, triple-junction, photodiodes) with an open-circuit voltage between 0.55 and 4 V
 * The solar harvesting circuit is activated by closing the solder jumper on the backside of the WildFi tag:
   * Tutorial: https://www.youtube.com/watch?v=uOp_2-7_1Hw
 
@@ -52,16 +52,16 @@ Open source modular biologger with 2.4 GHz connectivity (Bluetooth LE, WiFi, ESP
 
 # IDE for Software Development (Windows)
 * Visual Studio Code (>= 1.54.3) with PlatformIO (Core >= 5.1.1, Home >= 3.3.4)
-   * After installing the IDE the pre-configured PlatformIO project can be opened from: [Software/WildFiFirmware](Software/WildFiFirmware)
+   * After installing the IDE: the pre-configured PlatformIO project can be opened from: [Software/WildFiFirmware](Software/WildFiFirmware)
    * The sub folder [firmware](Software/WildFiFirmware/firmware) includes productive software for tag operation
    * The sub folders [testREVX](Software/WildFiFirmware) include test software
-   * All firmware versions use the modular WildFi software architecture that can be found here: [Software/WildFiSoftwareArchitecture](Software/WildFiSoftwareArchitecture)
+   * All firmware versions use the modular WildFi software architecture that can be found in: [Software/WildFiSoftwareArchitecture](Software/WildFiSoftwareArchitecture)
    * The PlatformIO project is configured via [Software/WildFiFirmware/platformio.ini](Software/WildFiFirmware/platformio.ini) (the parameter src_dir selects the application that shall be compiled)
 * After compilation three binary files are generated
   * bootloader.bin: the bootloader firmware
   * partitions.bin: includes the flash partition table for the ESP32
   * firmware.bin: includes the actual WildFi firmware
-  * When using PlatformIO to compile the files are automatically generated in Software/WildFiFirmware/.pio/build/pico32
+  * When using PlatformIO to compile: The files are automatically generated in Software/WildFiFirmware/.pio/build/pico32
 * Alternative IDE: Eclipse (eclipse-cpp-2020-09-R-win32-x86_64) and idf-eclipse plugin (tutorial: https://github.com/espressif/idf-eclipse-plugin/blob/master/README.md), project stub with complete software architecture integration for Eclipse is located in [Software/WildFiSoftwareArchitecture](Software/WildFiSoftwareArchitecture)
 
 # Flashing the Firmware
