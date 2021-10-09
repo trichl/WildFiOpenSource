@@ -1,7 +1,7 @@
 # WildFi biologger
 Open source modular biologger with 2.4 GHz connectivity (Bluetooth LE, WiFi, ESP NOW). This repository includes hardware design files of the WildFi tag and WildFi extension boards, embedded software, software architecture, software for the ESP32 CAM gateways, an Android app for remote data download, and decoding software.
 
-![WildFiTagREV6](https://github.com/trichl/WildFiOpenSource/blob/main/Hardware/WildFiTagREV6.png?raw=true)
+![WildFiTagREV6](https://github.com/trichl/WildFiOpenSource/blob/main/Hardware/Pictures/WildFiTagREV6.png?raw=true)
 
 # Sensors and communication interfaces
 * The WildFi tag integrates an ESP32 Pico D4 microcontroller and following additional components:
@@ -20,12 +20,12 @@ Open source modular biologger with 2.4 GHz connectivity (Bluetooth LE, WiFi, ESP
   * 2 x power control lines (allowing for independent powering of sensors and memory)
 
 # Pinout of the ESP32 Pico D4 and the extension ports
-![ESP32PinoutV2](https://github.com/trichl/WildFiOpenSource/blob/main/Hardware/ESP32PinoutV2.png?raw=true)
+![ESP32PinoutV2](https://github.com/trichl/WildFiOpenSource/blob/main/Hardware/Pictures/ESP32PinoutV2.png?raw=true)
 
-![WildFiTagREV6-Extension-Ports](https://github.com/trichl/WildFiOpenSource/blob/main/Hardware/WildFiTagREV6-Extension-Ports.png?raw=true)
+![WildFiTagREV6-Extension-Ports](https://github.com/trichl/WildFiOpenSource/blob/main/Hardware/Pictures/WildFiTagREV6-Extension-Ports.png?raw=true)
 
 # Connecting Battery
-![WildFiTagREV6Connectors](https://github.com/trichl/WildFiOpenSource/blob/main/Hardware/WildFiTagREV6Connectors.png?raw=true)
+![WildFiTagREV6Connectors](https://github.com/trichl/WildFiOpenSource/blob/main/Hardware/Pictures/WildFiTagREV6Connectors.png?raw=true)
 
 * Onboard connector type: JST SM02B-SURS-TF(LF)(SN)
 * Compatible wire connector (AWG #32, max. 500 mA, 150 mm): JST 02SUR-02SUR-32W150
