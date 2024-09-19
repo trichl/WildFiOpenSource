@@ -7,12 +7,19 @@
 #define GPS_MAX_SATELLITES_IN_USE 				12
 #define GPS_MAX_SATELLITES_IN_VIEW 				16
 
+#define RTC_UPDATE_THRESHOLD					20  // Don't set RTC if time difference is less than +/-x ms
+#define UART_OFFSETS_LENGTH                     8
+#define UART_OFFSETS_OFFSET                     4 // How many sats on index 0 of UARToffsets array
+constexpr uint32_t UARToffsets[UART_OFFSETS_LENGTH] = {73,77,142,155,167,179,194,225};
+
 typedef struct {
     uint32_t timeoutSeconds;                        // timeout
     uint32_t timeoutNotEvenTimeSeconds;             // timeout (date still 1980)
     float minHDOP;                                  // minimum HDOP that needs to be reached before stopping the fix attempt
     uint8_t afterFixMaxWaitOnHDOP;                  // maximum wait time in seconds
     bool waitAfterFixUntilZeroMs;                   // after getting a fix (including HDOP requirements): additionally wait until messages arrive at .000 ms
+    bool usePPSReference;                           // compensate delay introduced by uart communication by using pulse per second (pps) output of GPS module to more precisely determine time
+    bool setSYSTime;                                // set ESP system time after fix
     bool setRTCTime;                                // last action when got a fix: update the RTC time
     bool blinkLeds;                                 // red = no fix, green = fix
     bool debug;                                     // debug output
@@ -141,11 +148,12 @@ class GPS_L70_REV6 {
 		bool waitForAnswer(const char* answer, uint16_t timeousMs);
         get_uart_result_t afterLightSleepWaitForGPRMCandGPGGA(esp_gps_t *gpsData, bool *hasValidTimestamp, uint16_t *uartMillisWait, bool debug);
         get_fix_result_t tryToGetFix(esp_gps_t *gpsData, gps_get_fix_config_t *config, WildFiTagREV6 *device); // uses afterLightSleepWaitForGPRMCandGPGGA
+        get_fix_result_t tryToGetFixV2(esp_gps_t *gpsData, gps_get_fix_config_t *config, WildFiTagREV6 *device);
 		get_decode_result_t gpsDecodeLine(esp_gps_t *esp_gps, char *d, uint32_t len);
         bool gpsDecodeCorruptedGPRMCLine(esp_gps_t *esp_gps, const char* message);
         uint32_t estimateUARTSendTimeMs(uint32_t messageLength);
         bool updateUTCTimestamp(esp_gps_t *gpsData);
-        void checkAliveAndMaybeChangeBaudrate(WildFiTagREV6 *device, bool debug);
+        void checkAliveAndMaybeChangeBaudrate(WildFiTagREV6 *device, bool blinkIfError, bool debug);
 
 	private:
     	float parseLatLong(esp_gps_t *esp_gps);

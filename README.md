@@ -72,8 +72,8 @@ Open source modular biologger with 2.4 GHz connectivity (Bluetooth LE, WiFi, ESP
 * Software can be flashed via PlatformIO directly (PlatformIO automatically executes the following command: C:\\Users\\[username]\\.platformio\\packages\\tool-esptoolpy\\esptool.py --chip esp32 --port "COM99" --baud 460800 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 40m --flash_size detect 0x10000 .pio\\build\\pico32\\firmware.bin)
 * Or by using [FlashDownloadTool/esptool/esptool.py](FlashDownloadTool/esptool/esptool.py) directly (see above for flashing command)
   * Python needs to be installed (latest version)
-* Or by using [FlashDownloadTool/flash_download_tool_3.8.5.exe](FlashDownloadTool/flash_download_tool_3.8.5.exe) with following settings:
-
+* Or by using [FlashDownloadTool/flash_download_tool_3.9.6.exe](FlashDownloadTool/flash_download_tool_3.9.6.exe) with following settings:
+  Choose ChipType: ESP32 unless otherwise defined
 ![WildFiTagSettings](https://github.com/trichl/WildFiOpenSource/blob/main/FlashDownloadTool/WildFiTagSettings.png?raw=true)
 
 # ESP-IDF Software Framework

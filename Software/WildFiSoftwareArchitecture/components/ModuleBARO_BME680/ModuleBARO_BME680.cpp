@@ -548,10 +548,14 @@ uint32_t BARO_BME680::calc_pressure(uint32_t pres_adc)
 	var1 = ((32768 + var1) * (int32_t)dev.calib.par_p1) >> 15;
 	pressure_comp = 1048576 - pres_adc;
 	pressure_comp = (int32_t)((pressure_comp - (var2 >> 12)) * ((uint32_t)3125));
-	if (pressure_comp >= BME680_MAX_OVERFLOW_VAL)
+	if (pressure_comp >= BME680_MAX_OVERFLOW_VAL) {
+		if(var1 == 0) { return BME680_MAX_OVERFLOW_VAL; } // NEW TIMM: crashed before because division by 0
 		pressure_comp = ((pressure_comp / var1) << 1);
-	else
+	}
+	else {
+		if(var1 == 0) { return BME680_MAX_OVERFLOW_VAL; } // NEW TIMM: crashed before because division by 0
 		pressure_comp = ((pressure_comp << 1) / var1);
+	}
 	var1 = ((int32_t)dev.calib.par_p9 * (int32_t)(((pressure_comp >> 3) *
 		(pressure_comp >> 3)) >> 13)) >> 12;
 	var2 = ((int32_t)(pressure_comp >> 2) *

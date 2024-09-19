@@ -46,7 +46,7 @@ static esp_adc_cal_characteristics_t *adc_chars; 									// characteristics for
 
 /** ----- WAKE STUB VARIABLES ----- */
 
-RTC_DATA_ATTR uint32_t adcValue = 0;
+RTC_DATA_ATTR uint32_t batteryVoltageWakeStub = 0;
 RTC_DATA_ATTR uint32_t adcCoeffA = 0;
 RTC_DATA_ATTR uint32_t adcCoeffB = 0;
 RTC_DATA_ATTR bool gpioHoldEnabled = false;
@@ -92,7 +92,7 @@ bool WildFiTagREV6::selfTest(uint16_t voltageSupplied, uint32_t testBits, uint16
 	printf("%d Selftest: 01: voltage measurement..", ((uint32_t) Timing::millis()));
 	if((testBits & SELFTEST_VOLTAGE) == 0) { printf("..SKIPPED\n"); }
 	else {
-		uint16_t voltageMeasured = readSupplyVoltage();
+		uint16_t voltageMeasured = readSupplyVoltage(true);
 		uint16_t voltageOffset = 0;
 		if(voltageMeasured > voltageSupplied) {
 			voltageOffset = voltageMeasured - voltageSupplied;
@@ -128,7 +128,7 @@ bool WildFiTagREV6::selfTest(uint16_t voltageSupplied, uint32_t testBits, uint16
 	if((testBits & SELFTEST_HALLSENSOR) == 0) { printf("..SKIPPED\n"); }
 	else {
 		int32_t hallValue = readHallSensor(1);
-		if((hallValue) >= 80 || (hallValue <= -80)) { printf("..FAILED (out of bounds: %d)\n", hallValue); return false; }
+		if((hallValue) >= 100 || (hallValue <= -100)) { printf("..FAILED (out of bounds: %d)\n", hallValue); return false; }
 		printf("..(%d)..OKAY\n", hallValue);
 	}
 
@@ -226,6 +226,7 @@ bool WildFiTagREV6::selfTest(uint16_t voltageSupplied, uint32_t testBits, uint16
 	if((testBits & SELFTEST_FLASH_BAD_BLOCKS) || (testBits & SELFTEST_FLASH_READ_WRITE) || (testBits & SELFTEST_FLASH_FULL_ERASE)) { // flash related tests
 		printf("%d Selftest: - flash power on -\n", ((uint32_t) Timing::millis()));
 		if(!flashPowerOn(true)) { printf("..FAILED (power on)\n"); return false; }
+		if(!flash.waitOnID()) { printf("..FAILED (id %04X not seen)\n", MT29_FLASH_ID); flashPowerOff(true); return false; }
 	}
 
 	/** Flash bad blocks */
@@ -502,7 +503,7 @@ bool WildFiTagREV6::flashPowerOn(bool withDelay) {
 	gpio_set_level(PIN_SPI_CS, 1);
 	
 	if(withDelay) {
-		delay(10); // according to datasheet of MT29: at least 1.25ms shall elapse before doing stuff
+		delay(10); // according to datasheet of MT29: at least 1.25ms shall elapse before doing stuff -> during this time SPI returns 0 for everything
 	}
 	bool res = spi.init(); // init SPI for MT29
 	return res;
@@ -635,16 +636,17 @@ uint32_t WildFiTagREV6::readSupplyVoltageFromADC() {
 }
 
 uint32_t WildFiTagREV6::readSupplyVoltageFromWakeStub() {
-	return adcValue;
+	return batteryVoltageWakeStub;
 }
 
-uint16_t WildFiTagREV6::readSupplyVoltage() {
+uint16_t WildFiTagREV6::readSupplyVoltage(bool updateWakeStubVoltage) {
 	uint32_t voltage;
 	if(!ADCinitialized) { // requires initPins before read
 		return 0;
 	}
 	voltage = readSupplyVoltageFromADC();
 	voltage = (voltage * (BATT_VOLT_RES_1 + BATT_VOLT_RES_2)) / BATT_VOLT_RES_2; // converting measured voltage to battery voltage (voltage divider), e.g. (3300 * (100+47)) / 100 = 4851 = 4.81V
+	if(updateWakeStubVoltage) { batteryVoltageWakeStub = voltage; }
 	return (uint16_t) voltage;
 }
 
@@ -877,6 +879,13 @@ void WildFiTagREV6::enableInternalTimerInterruptInDeepSleep(uint32_t seconds) {
 	esp_sleep_enable_timer_wakeup(sleepTimeInUs);
 }
 
+void WildFiTagREV6::enableShortInternalTimerInterruptInDeepSleep(uint32_t milliseconds) {
+	// max. 400 days
+	uint64_t sleepTimeInUs = milliseconds; // IMPORTANT: had overflow before due to not using ULL
+	sleepTimeInUs *= 1000ULL;
+	esp_sleep_enable_timer_wakeup(sleepTimeInUs);
+}
+
 void WildFiTagREV6::ultraShortDeepSleep() {
 	uint64_t sleepTimeInUs = 1000ULL; // 1ms
 	esp_sleep_enable_timer_wakeup(sleepTimeInUs);
@@ -913,6 +922,24 @@ void WildFiTagREV6::printTxPower() {
     int8_t txPwr = 0;
 	esp_wifi_get_max_tx_power(&txPwr);
 	printf("TX POWER: %d\n", txPwr);
+}
+
+bool WildFiTagREV6::gpioAGetLevel() {
+	rtc_gpio_init(PIN_GPIO_A);
+    rtc_gpio_set_direction(PIN_GPIO_A, RTC_GPIO_MODE_INPUT_ONLY);
+	return gpio_get_level(PIN_GPIO_A);
+}
+
+void WildFiTagREV6::enableGpioAInterruptInLightSleep(bool level) {
+	//Interrupts dont improve wakeup time of about 1.5-2ms
+	rtc_gpio_init(PIN_GPIO_A);
+    rtc_gpio_set_direction(PIN_GPIO_A, RTC_GPIO_MODE_INPUT_ONLY);
+	gpio_wakeup_enable(PIN_GPIO_A, level ? GPIO_INTR_HIGH_LEVEL : GPIO_INTR_LOW_LEVEL);
+	esp_sleep_enable_gpio_wakeup();
+}
+
+void WildFiTagREV6::disableGpioAInterruptInLightSleep() {
+	gpio_wakeup_disable(PIN_GPIO_A);
 }
 
 void WildFiTagREV6::gpioBOn() {
@@ -988,13 +1015,104 @@ void WildFiTagREV6::uart2InterruptPrint(uint16_t stopAfter) {
 	}
 }
 
+void WildFiTagREV6::flashStressTest() {
+    const uint32_t PAGES_START = 0; // 0
+    const uint32_t PAGES_END = 131072; // 131072
+    const uint8_t BYTE_TO_WRITE = 0xAB; // 10101011
+    bool partialWrite = true;
+
+    uint8_t *testData = NULL;
+    if(!flash.createBuffer(&testData, MT29_CACHE_SIZE)) { printf("flashStressTest: ..FAILED (buffer create)\n"); } 
+
+    printf("flashStressTest: %llu DELETING FULL MEMORY\n", Timing::millis());
+    flashPowerOn(true);
+    if(flash.fullErase()) {
+        bool error = false;
+        printf("flashStressTest: %llu WRITING MEMORY\n", Timing::millis());
+        for(uint32_t i=PAGES_START; i<PAGES_END; i++) {
+            // FILL
+            for(uint16_t j=0; j<MT29_CACHE_SIZE; j++) { testData[j] = BYTE_TO_WRITE; }
+            // WRITE
+            if(partialWrite) {
+                if(!flash.partialWrite(i, 0, testData, 512)) { printf("flashStressTest: ..FAILED (write page %d PART 1)\n", i); error = true; break; }
+                if(!flash.partialWrite(i, 512, testData+512, 512)) { printf("flashStressTest: ..FAILED (write page %d PART 2)\n", i); error = true; break; }
+                if(!flash.partialWrite(i, 1024, testData+1024, 512)) { printf("flashStressTest: ..FAILED (write page %d PART 3)\n", i); error = true; break; }
+                if(!flash.partialWrite(i, 1536, testData+1536, 512)) { printf("flashStressTest: ..FAILED (write page %d PART 4)\n", i); error = true; break; }
+            }
+            else {
+                if(!flash.write(i, testData, MT29_CACHE_SIZE)) { printf("flashStressTest: ..FAILED (write page %d)\n", i); error = true; break; }
+            }
+            if(error) { break; }
+            // OUTPUT
+            if(i % 1000 == 0) { printf("flashStressTest: %llus WRITE MEMORY STATUS PG %d/%d\n", Timing::millis()/1000, i, PAGES_END); }
+        }
+
+		if(!error) {
+			printf("flashStressTest: %llu TURNING FLASH ON/OFF\n", Timing::millis());
+			flashPowerOff(true);
+			Timing::delay(5000);
+			flashPowerOn(true);
+
+			printf("flashStressTest: %llu READING MEMORY\n", Timing::millis());
+			for(uint32_t i=PAGES_START; i<PAGES_END; i++) {
+				for(uint16_t j=0; j<MT29_CACHE_SIZE; j++) { testData[j] = 0xFF; } // reset array
+				//READ
+				if(!flash.readWithECC(i, 0, testData, MT29_CACHE_SIZE)) { printf("flashStressTest: ..FAILED (read page %d)\n", i); error = true; break; }
+				for(uint16_t j=0; j<MT29_CACHE_SIZE; j++) {
+					if(testData[j] != BYTE_TO_WRITE) {
+						printf("flashStressTest: ..FAILED (compare page %d, %02X vs %02X)\n", i, testData[j], BYTE_TO_WRITE);
+						printf("flashStressTest: ..DUMP:\n");
+						for(uint16_t d=0; d<MT29_CACHE_SIZE; d++) { printf("%02X ", testData[d]); }
+						printf("\n");
+						error = true;
+						break;
+					}
+				}
+				if(error) { break; }
+				// OUTPUT
+				if(i % 1000 == 0) { printf("flashStressTest: %llus READ MEMORY STATUS PG %d/%d\n", Timing::millis()/1000, i, PAGES_END); }
+			}
+		}
+
+        printf("flashStressTest: %llu DELETING FULL MEMORY\n", Timing::millis());
+        if(!flash.fullErase()) { printf("flashStressTest: FAILED FULL ERASE\n"); }
+        printf("flashStressTest: %llu --- DONE --- (ERROR = %d)\n", Timing::millis(), error);
+    }
+    else { printf("flashStressTest: FAILED FULL ERASE\n"); }
+	flashPowerOff(true);
+}
+
 /** ----- UART 1 ----- */
 
-bool WildFiTagREV6::serialMenue(bool blinkRed, const char *nvsOwnIdString, const char *nvsActivationString, void (*gpsFunction)(void)) {
+bool WildFiTagREV6::serialMenueGetSelfTestDone(const char *nvsSelfTestDone) {
+	if(initNVS()) {
+		bool neverWritten = false;
+		uint8_t nvsAlreadyCalledSerialMenue = defaultNvsReadUINT8(nvsSelfTestDone, &neverWritten);
+		if(neverWritten) { return false; }
+		else {
+			if(nvsAlreadyCalledSerialMenue > 0) { return true; }
+			else { return false; } 
+		}
+	}
+	return false; // in case of error: do not proceed
+}
+
+void WildFiTagREV6::serialMenueSetSelfTestDone(const char *nvsSelfTestDone) {
+	if(initNVS()) {
+		if(!defaultNvsWriteUINT8(nvsSelfTestDone, 0xAA)) { printf("ERROR2\n"); }
+	}
+	else { printf("ERROR1\n"); }
+}
+
+bool WildFiTagREV6::serialMenue(bool blinkRed, const char *nvsSelfTestDone, const char *nvsOwnIdString, const char *nvsActivationString, void (*gpsFunction)(void), void (*gpsFunction2)(void)) {
     bool didEnterMenue = false;
+	bool selfTestDone = false;
     setCPUSpeed(ESP32_10MHZ);
     printf("serialMenue: press 'w' to enter\n");
-	uint16_t voltageMeasured = readSupplyVoltage();
+	selfTestDone = serialMenueGetSelfTestDone(nvsSelfTestDone);
+	if(!selfTestDone) { printf("- SELF-TEST NOT DONE -\n"); }
+
+	uint16_t voltageMeasured = readSupplyVoltage(false);
 	if(blinkRed) {
 		uint16_t blinkies = 0;
 		blinkies = (voltageMeasured / 150) - 20;
@@ -1006,24 +1124,30 @@ bool WildFiTagREV6::serialMenue(bool blinkRed, const char *nvsOwnIdString, const
 		printf("** ------------------- **\n");
         printf("** WILDFI SERIAL MENUE **\n");
 		printf("** ------------------- **\n");
-		printf("** Vbatt = %d mV **\n", voltageMeasured);
-        printf("1\tdelete flash memory and NVS\n");
+		printf("** Vbatt = %d (wakeStub) / %d mV **\n", readSupplyVoltageFromWakeStub(), voltageMeasured);
+        printf("1\tdelete flash memory and data NVS (flash pointer, mag calib)\n");
         printf("2\tcalibrate IMU\n");
         printf("3\tre-calibrate IMU (forced)\n");
         printf("4\tself-test 1 (voltage, leds, hall sensor, i2c, rtc, imu, baro, clock-down, esp-now)\n");
-        printf("5\tself-test 2 (full with IMU foc, flash bad block test, flash reset, NVS reset)\n");
+        printf("5\tself-test 2 (full with IMU foc, flash bad block test, flash reset, NVS reset, GPS baudrate change)\n");
         if(nvsOwnIdString == NULL) { printf("6\twrite id (NOT SUPPORTED)\n"); }
 		else { printf("6\twrite id\n"); }
         printf("7\tread flash memory\n");
-        printf("8\treset config (normal NVS)\n");
-		printf("9\tprint data NVS entries\n");
-		printf("10\tprint normal NVS entries\n");
+        printf("8\treset normal NVS (config)\n");
+		printf("9\tprint data NVS (flash pointer, mag calib)\n");
+		printf("10\tprint normal NVS (config)\n");
 		if(gpsFunction == NULL) { printf("11\tset GPS baudrate (NOT SUPPORTED)\n"); }
 		else { printf("11\tset GPS baudrate\n"); }
         if(nvsActivationString == NULL) { printf("12\twrite activation (NOT SUPPORTED)\n"); }
 		else { printf("12\twrite activation\n"); }
 		printf("13\tflash bad block test\n");
 		printf("14\tmodify normal NVS entries\n");
+		printf("15\tmodify data NVS entries\n");
+		if(gpsFunction == NULL) { printf("16\tGPS test (NOT SUPPORTED)\n"); }
+		else { printf("16\tGPS test\n"); }
+		printf("17\tflash stress test (5-10min)\n");
+		printf("18\tflash memory dump\n");
+		printf("19\tset self-test done bit\n");
         printf("q\tquit\n");
 		printf("-> enter number and hit enter!\n");
 		uint32_t selection = waitOnNumberInput(60);
@@ -1058,7 +1182,12 @@ bool WildFiTagREV6::serialMenue(bool blinkRed, const char *nvsOwnIdString, const
             uint32_t voltageRef = waitOnNumberInput(15);
             printf("Entered value: %d\n", voltageRef);
             selfTest((uint16_t) voltageRef, SELFTEST_VOLTAGE | SELFTEST_LEDS | SELFTEST_HALLSENSOR | SELFTEST_I2C | SELFTEST_RTC | SELFTEST_ACC_GYRO_FOC_CHECK | SELFTEST_ACC_GYRO_FOC_EXECUTE_IF_UNSET /*| SELFTEST_ACC_GYRO_FOC_FORCE_EXECUTION*/ | SELFTEST_BARO | SELFTEST_FLASH_BAD_BLOCKS | SELFTEST_FLASH_READ_WRITE | SELFTEST_FLASH_FULL_ERASE | SELFTEST_NVS_RESET | SELFTEST_CPU_CLOCK_DOWN | /*SELFTEST_WIFI_SCAN |*/ SELFTEST_ESPNOW_BROADCAST, 2);
-            delay(6000);
+            if(gpsFunction != NULL) {
+				gpsFunction();
+				delay(2000);
+			}
+			serialMenueSetSelfTestDone(nvsSelfTestDone); // set self-test done even in case of error
+			delay(6000);
             didEnterMenue = true;
         }
         else if(selection == 6) {
@@ -1109,7 +1238,7 @@ bool WildFiTagREV6::serialMenue(bool blinkRed, const char *nvsOwnIdString, const
             didEnterMenue = true;
         }
 		else if(selection == 9) {
-			printf("- %d selected -> PRINT NVS!\n", selection);
+			printf("- %d selected -> PRINT DATA NVS!\n", selection);
 			if(!initDataNVS()) { printf("ERROR1\n"); }
 			else {
 				nvs_iterator_t it = nvs_entry_find(NVS_DATA_PARTITION, "storage", NVS_TYPE_ANY);
@@ -1129,6 +1258,10 @@ bool WildFiTagREV6::serialMenue(bool blinkRed, const char *nvsOwnIdString, const
 					else if(info.type == NVS_TYPE_U32) {
 						uint32_t val = nvsReadUINT32(info.key);
 						printf("%d key '%s', type 'U32', val '%d'\n", counter, info.key, val);
+					}
+					else if(info.type == NVS_TYPE_I16) {
+						int16_t val = nvsReadINT16(info.key);
+						printf("%d key '%s', type 'I16', val '%d'\n", counter, info.key, val);
 					}
 					else if(info.type == NVS_TYPE_BLOB) {
 						uint32_t size = nvsGetBlobSize(info.key);
@@ -1226,7 +1359,6 @@ bool WildFiTagREV6::serialMenue(bool blinkRed, const char *nvsOwnIdString, const
 						uint8_t typeOfEntry = 0;
 						bool neverWritten = false;
 						uint32_t val = 0; 
-						// TIMMBO
 						val = (uint32_t) defaultNvsReadUINT8(stringInput, &neverWritten);
 						if(neverWritten) {
 							val = (uint32_t) defaultNvsReadUINT16(stringInput, &neverWritten);
@@ -1289,6 +1421,159 @@ bool WildFiTagREV6::serialMenue(bool blinkRed, const char *nvsOwnIdString, const
             delay(2000);
             didEnterMenue = true;
         }
+		else if(selection == 15) {
+            printf("- %d selected -> MODIFY DATA NVS ENTRIES\n", selection);
+			if(!initDataNVS()) { printf("ERROR1\n"); }
+			else {
+				const uint8_t maxStringLength = 20;
+				char stringInput[maxStringLength] = { 0 };
+				while(1) {
+					nvs_iterator_t it = nvs_entry_find(NVS_DATA_PARTITION, "storage", NVS_TYPE_ANY);
+					uint32_t counter = 0;
+					while(it != NULL) {
+						nvs_entry_info_t info;
+						nvs_entry_info(it, &info);
+						it = nvs_entry_next(it);
+						if(info.type == NVS_TYPE_U8) {
+							uint8_t val = nvsReadUINT8(info.key);
+							printf("%d key '%s', type 'U8', val '%d'\n", counter, info.key, val);
+						}
+						else if(info.type == NVS_TYPE_U16) {
+							uint16_t val = nvsReadUINT16(info.key);
+							printf("%d key '%s', type 'U16', val '%d'\n", counter, info.key, val);
+						}
+						else if(info.type == NVS_TYPE_U32) {
+							uint32_t val = nvsReadUINT32(info.key);
+							printf("%d key '%s', type 'U32', val '%d'\n", counter, info.key, val);
+						}
+						else if(info.type == NVS_TYPE_BLOB) {
+							uint32_t size = nvsGetBlobSize(info.key);
+							printf("%d key '%s', type 'BLOB', size '%d'\n", counter, info.key, size);
+						}
+						else {
+							printf("%d key '%s', type '%d', VAL NOT SUPPORTED\n", counter, info.key, info.type);
+						}
+						counter++;
+					}
+					if(counter == 0) {
+						printf("- DATA NVS EMPTY -\n");
+					}
+					printf("- Enter NVS name and press enter (enter for quit):\n");
+					if(waitOnStringInput(stringInput, maxStringLength, 60)) {
+						printf("- Entered: %s\n", stringInput);
+						uint8_t typeOfEntry = 0;
+						bool neverWritten = false;
+						uint32_t val = 0; 
+						val = (uint32_t) nvsReadUINT8(stringInput, &neverWritten);
+						if(neverWritten) {
+							val = (uint32_t) nvsReadUINT16(stringInput, &neverWritten);
+							if(neverWritten) {
+								val = nvsReadUINT32(stringInput, &neverWritten);
+								if(neverWritten) { typeOfEntry = 0; } // not existing
+								else { typeOfEntry = 3; } // u32
+							}
+							else { typeOfEntry = 2; } // u16
+						}
+						else { typeOfEntry = 1; } // u8
+
+						if(typeOfEntry == 0) {
+							printf("- Not existing, creating new, enter type (0 = U8, 1 = U16, 2 = U32):\n");
+							uint32_t typeInput = waitOnNumberInput(60);
+							if(typeInput < 3) {
+								printf("- Enter value:\n");
+								uint32_t valueInput = waitOnNumberInput(60);
+								if(typeInput == 0) {
+									if(!nvsWriteUINT8(stringInput, (uint8_t) valueInput)) { printf("- ERROR\n"); }
+									else { printf("- CREATED U8: %s = %d\n", stringInput, (uint8_t) valueInput); }
+								}
+								else if(typeInput == 1) {
+									if(!nvsWriteUINT16(stringInput, (uint16_t) valueInput)) { printf("- ERROR\n"); }
+									else { printf("- CREATED U16: %s = %d\n", stringInput, (uint16_t) valueInput); }
+								}
+								else if(typeInput == 2) {
+									if(!nvsWriteUINT32(stringInput, (uint32_t) valueInput)) { printf("- ERROR\n"); }
+									else { printf("- CREATED U32: %s = %d\n", stringInput, (uint32_t) valueInput); }
+								}
+							}
+							else { printf("- Invalid!\n"); }
+						}
+						else {
+							if(typeOfEntry == 1) { printf("- Existing, Type: U8, Value: %d\n", val); }
+							else if(typeOfEntry == 2) { printf("- Existing, Type: U16, Value: %d\n", val); }
+							else if(typeOfEntry == 3) { printf("- Existing, Type: U32, Value: %d\n", val); }
+							printf("- Enter value:\n");
+							uint32_t valueInput = waitOnNumberInput(60);
+							if(typeOfEntry == 1) {
+								if(!nvsWriteUINT8(stringInput, (uint8_t) valueInput)) { printf("- ERROR\n"); }
+								else { printf("- CREATED U8: %s = %d\n", stringInput, (uint8_t) valueInput); }
+							}
+							else if(typeOfEntry == 2) {
+								if(!nvsWriteUINT16(stringInput, (uint16_t) valueInput)) { printf("- ERROR\n"); }
+								else { printf("- CREATED U16: %s = %d\n", stringInput, (uint16_t) valueInput); }
+							}
+							else if(typeOfEntry == 3) {
+								if(!nvsWriteUINT32(stringInput, (uint32_t) valueInput)) { printf("- ERROR\n"); }
+								else { printf("- CREATED U32: %s = %d\n", stringInput, (uint32_t) valueInput); }
+							}
+						}
+					}
+					else {
+						printf("Ciao!\n"); 
+						break;
+					}
+				}
+			}
+            delay(2000);
+            didEnterMenue = true;
+        }
+		else if(selection == 16) {
+			printf("- %d selected -> GPS TEST!\n", selection);
+			if(gpsFunction2 == NULL) {
+				printf("NOT POSSIBLE in this version!\n");
+			}
+			else {
+				gpsFunction2();
+			}
+			delay(5000);
+			didEnterMenue = true;
+		}
+		else if(selection == 17) {
+			printf("- %d selected -> FLASH STRESS TEST!\n", selection);
+			flashStressTest();
+			delay(5000);
+			didEnterMenue = true;
+		}
+		else if(selection == 18) {
+            printf("- %d selected -> FLASH MEMORY DUMP!\nPlease enter start page (0 - %d):\n", selection, MT29_NUMBER_PAGES-1);
+            uint32_t startPage = waitOnNumberInput(60);
+            printf("Entered value: %d\n", startPage);
+            if(startPage < MT29_NUMBER_PAGES) {
+                printf("Please enter number of pages (1 - %d): \n", MT29_NUMBER_PAGES - startPage);
+                uint32_t numberPages = waitOnNumberInput(60);
+                printf("Entered value: %d\n", numberPages);
+                if((numberPages > 0) && (numberPages <= (MT29_NUMBER_PAGES - startPage))) {
+					printf("-----------\n");
+					esp_task_wdt_init(120, false); // set task watchdog timeout to 120 seconds
+    				if(!flashPowerOn()) { printf("ERROR FLASH\n"); }
+    				delay(500);
+    				if(!flash.printFlash(startPage, numberPages, MT29_CACHE_SIZE, true)) { printf("ERROR FLASH2\n"); }
+    				if(!flashPowerOff(true)) { printf("ERROR FLASH3\n"); }
+					printf("-----------\n");
+                }
+                else { printf("INVALID\n"); }
+            }
+            else { printf("INVALID\n"); }
+			setCPUSpeed(ESP32_10MHZ);
+			printf("ENDLESS LOOP\n");
+			didEnterMenue = true;
+			while(1) { ; }
+        }
+		else if(selection == 19) {
+			printf("- %d selected -> SET SELF-TEST DONE BIT!\n", selection);
+			serialMenueSetSelfTestDone(nvsSelfTestDone);
+			delay(5000);
+			didEnterMenue = true;
+		}
         else {
             printf("Timeout or command (%d) unknown -> CIAO!\n", selection);
         }
@@ -1296,7 +1581,8 @@ bool WildFiTagREV6::serialMenue(bool blinkRed, const char *nvsOwnIdString, const
     }
     setCPUSpeed(ESP32_80MHZ);
     if(didEnterMenue) { Timing::delay(100); } // wait a bit for serial stuff to settle down
-    return didEnterMenue; // re-start if did enter menue
+	if(!selfTestDone) { return true; } // always re-start when self-test not done yet
+    else { return didEnterMenue; } // re-start if did enter menue
 }
 
 bool WildFiTagREV6::waitOnChar(char c, uint16_t timeoutSeconds) {
@@ -1648,6 +1934,35 @@ bool WildFiTagREV6::defaultNvsWriteUINT8(const char *key, uint8_t val) {
 	return true;
 }
 
+int16_t WildFiTagREV6::nvsReadINT16(const char *key) {
+	esp_err_t err;
+	int16_t value = 0; // default 0 if not existing
+	if(!NVSForDataInitialized) {
+		return 0;
+	}
+	// open
+    nvs_handle_t handle;
+    err = nvs_open_from_partition(NVS_DATA_PARTITION, "storage", NVS_READWRITE, &handle);
+    if (err != ESP_OK) {
+        return 0;
+    }
+	// read
+    err = nvs_get_i16(handle, key, &value);
+	nvs_close(handle);
+    switch (err) {
+        case ESP_OK:
+			return value;
+            break;
+        case ESP_ERR_NVS_NOT_FOUND:
+            // value not initialized
+			return 0;
+            break;
+        default :
+            return 0;
+    }
+	return 0;
+}
+
 uint8_t WildFiTagREV6::nvsReadUINT8(const char *key) {
 	esp_err_t err;
 	uint8_t value = 0; // default 0 if not existing
@@ -1733,6 +2048,160 @@ uint32_t WildFiTagREV6::nvsReadUINT32(const char *key) {
             return 0;
     }
 	return 0;
+}
+
+int16_t WildFiTagREV6::nvsReadINT16(const char *key, bool *neverWritten) {
+	esp_err_t err;
+	int16_t value = 0; // default 0 if not existing
+	*neverWritten = false;
+	if(!NVSForDataInitialized) {
+		return 0;
+	}
+	// open
+    nvs_handle_t handle;
+    err = nvs_open_from_partition(NVS_DATA_PARTITION, "storage", NVS_READWRITE, &handle);
+    if (err != ESP_OK) {
+        return 0;
+    }
+	// read
+    err = nvs_get_i16(handle, key, &value);
+	nvs_close(handle);
+    switch (err) {
+        case ESP_OK:
+			return value;
+            break;
+        case ESP_ERR_NVS_NOT_FOUND:
+            // value not initialized
+			*neverWritten = true;
+			return 0;
+            break;
+        default :
+		    *neverWritten = true;
+            return 0;
+    }
+	return 0;
+}
+
+uint8_t WildFiTagREV6::nvsReadUINT8(const char *key, bool *neverWritten) {
+	esp_err_t err;
+	uint8_t value = 0; // default 0 if not existing
+	*neverWritten = false;
+	if(!NVSForDataInitialized) {
+		return 0;
+	}
+	// open
+    nvs_handle_t handle;
+    err = nvs_open_from_partition(NVS_DATA_PARTITION, "storage", NVS_READWRITE, &handle);
+    if (err != ESP_OK) {
+        return 0;
+    }
+	// read
+    err = nvs_get_u8(handle, key, &value);
+	nvs_close(handle);
+    switch (err) {
+        case ESP_OK:
+			return value;
+            break;
+        case ESP_ERR_NVS_NOT_FOUND:
+            // value not initialized
+			*neverWritten = true;
+			return 0;
+            break;
+        default :
+		    *neverWritten = true;
+            return 0;
+    }
+	return 0;
+}
+
+uint16_t WildFiTagREV6::nvsReadUINT16(const char *key, bool *neverWritten) {
+	esp_err_t err;
+	uint16_t value = 0; // default 0 if not existing
+	*neverWritten = false;
+	if(!NVSForDataInitialized) {
+		return 0;
+	}
+	// open
+    nvs_handle_t handle;
+    err = nvs_open_from_partition(NVS_DATA_PARTITION, "storage", NVS_READWRITE, &handle);
+    if (err != ESP_OK) {
+        return 0;
+    }
+	// read
+    err = nvs_get_u16(handle, key, &value);
+	nvs_close(handle);
+    switch (err) {
+        case ESP_OK:
+			return value;
+            break;
+        case ESP_ERR_NVS_NOT_FOUND:
+            // value not initialized
+			*neverWritten = true;
+			return 0;
+            break;
+        default :
+		    *neverWritten = true;
+            return 0;
+    }
+	return 0;
+}
+
+uint32_t WildFiTagREV6::nvsReadUINT32(const char *key, bool *neverWritten) {
+	esp_err_t err;
+	uint32_t value = 0; // default 0 if not existing
+	*neverWritten = false;
+	if(!NVSForDataInitialized) {
+		return 0;
+	}
+	// open
+    nvs_handle_t handle;
+    err = nvs_open_from_partition(NVS_DATA_PARTITION, "storage", NVS_READWRITE, &handle);
+    if (err != ESP_OK) {
+        return 0;
+    }
+	// read
+    err = nvs_get_u32(handle, key, &value);
+	nvs_close(handle);
+    switch (err) {
+        case ESP_OK:
+			return value;
+            break;
+        case ESP_ERR_NVS_NOT_FOUND:
+            // value not initialized
+			*neverWritten = true;
+			return 0;
+            break;
+        default :
+		    *neverWritten = true;
+            return 0;
+    }
+	return 0;
+}
+
+bool WildFiTagREV6::nvsWriteINT16(const char *key, int16_t val) {
+	esp_err_t err;
+	if(!NVSForDataInitialized) {
+		return false;
+	}
+	// open
+    nvs_handle_t handle;
+    err = nvs_open_from_partition(NVS_DATA_PARTITION, "storage", NVS_READWRITE, &handle);
+    if (err != ESP_OK) {
+        return false;
+    }
+	// write
+	err = nvs_set_i16(handle, key, val); // 6-7ms (!)
+    if(err != ESP_OK) {
+		nvs_close(handle);
+		return false;
+	}
+    err = nvs_commit(handle);
+    if(err != ESP_OK) {
+		nvs_close(handle);
+		return false;
+	}
+    nvs_close(handle);
+	return true;
 }
 
 bool WildFiTagREV6::nvsWriteUINT8(const char *key, uint8_t val) {
@@ -2252,6 +2721,27 @@ bool WildFiTagREV6::wiFiSetCountryToUseChannel1to11() {
 	return true;
 }
 
+//Call this function before connectToWifiAfterScan(...) when connecting to an eduroam AP
+//	Source: https://github.com/martinius96/ESP32-eduroam
+//	anonymousIdentity: most of the time anonymous@organization.edu -> can be extracted from
+//			Config.anonymous_identity variable in linux installation script downloaded from eduroam website
+//	identity: username@organization.edu
+//	caCert: use certificate from Config.CA variable in eduroam linux installation script
+//			and format via python: > print("\""+("\\n\" \\\n\"".join(ca.split("\n")))+"\\n\";")
+bool WildFiTagREV6::setupEDUROAM(const char* anonymousIdentity, const char* identity, const char* password, const char* caCert) {
+	if(!wiFiInitialized) {
+		return false;
+	}
+	esp_wifi_sta_wpa2_ent_set_ca_cert((uint8_t *)caCert, strlen(caCert) + 1); //used by @debsahu in his example EduWiFi
+	//esp_wifi_sta_wpa2_ent_set_ca_cert((uint8_t *)test_root_ca, strlen(test_root_ca)); //try without strlen +1 too if not working
+	esp_wifi_sta_wpa2_ent_set_identity((uint8_t *)anonymousIdentity, strlen(anonymousIdentity));
+	esp_wifi_sta_wpa2_ent_set_username((uint8_t *)identity, strlen(identity));
+	esp_wifi_sta_wpa2_ent_set_password((uint8_t *)password, strlen(password));
+	esp_wifi_sta_wpa2_ent_enable();
+
+	return true;
+}
+
 bool WildFiTagREV6::connectToWiFiDirectly(const char* ssid, const char* password, int8_t maxTxPower, uint8_t channel) {
 	if(!wiFiInitialized) {
 		return false;
@@ -2432,6 +2922,158 @@ bool WildFiTagREV6::scanForWiFisOn1and6and11and13WithPriority(bool debug, const 
 	return true; // maybe not found but also no error
 }
 
+bool WildFiTagREV6::scanForWiFisOnAllChannels(bool debug, const char** ssids, const uint8_t wifiListSize, uint8_t *wifiArrayId, uint8_t *foundOnChannel, int8_t maxTxPower, uint32_t scanTimePerChannel1and6, uint16_t timeoutScanMs) {
+	// PROBLEM: if scanTime != 120 and wifi on channel 6 or 1 -> will not be changed back to 120s!!!
+	const uint8_t CHANNEL_LIST[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 };
+	uint8_t CHANNEL_LIST_SIZE = sizeof(CHANNEL_LIST) / sizeof(CHANNEL_LIST[0]);
+
+	uint8_t foundOnChannelUnused = 0;
+	bool foundAtLeastOneInList = false;
+	uint8_t minimumWifiArrayId = 0;
+	uint8_t minimumChannel = 0;
+	uint8_t foundArrayIdTemp = 0;
+	*foundOnChannel = 0;
+	if(!wiFiInitialized) { return false; }
+	wiFiScanRunning = true; // IMPORTANT: set this BEFORE esp_wifi_start -> because there it will be checked (trys to connect if false)
+    if(esp_wifi_start() != ESP_OK) { return false; }
+	esp_wifi_set_max_tx_power(maxTxPower); // ONLY WORKS AFTER esp_wifi_start, default = 78 (browns out) -> 52 * 0.25 = 13dBm works always
+
+	/** INIT */
+	wifi_active_scan_time_t scanTimeActive = {
+		.min = 0, // in ms per channel
+		.max = scanTimePerChannel1and6 // in ms per channel
+	};
+	wifi_scan_time_t scanTime = { };
+	scanTime.active = scanTimeActive;
+	wifi_scan_config_t scanConf = {
+        .ssid = NULL, // NULL = don't scan for specific SSID
+        .bssid = NULL, // NULL = don't scan for specific BSSID
+        .channel = 0, // 0 = all channel scan
+        .show_hidden = true, // show hidden wifis
+		.scan_type = WIFI_SCAN_TYPE_ACTIVE, // default = active scan (sends out beacon instead of passively waiting for one)
+		.scan_time = scanTime
+    };
+
+	/** SCAN CHANNELS */
+	for(uint8_t i = 0; i < CHANNEL_LIST_SIZE; i++) {
+		scanConf.channel = CHANNEL_LIST[i]; // modify channel
+		if(i == (CHANNEL_LIST_SIZE - 1)) { // IMPORTANT: last scan again 120ms long, because otherwise scan_time will be used also during connect (STUPID but TRUE!)
+			scanTime.active.max = 120; 
+			scanConf.scan_time = scanTime;
+		}
+		wiFiScanDone = false; // will be set to true in esp_wifi_scan_start (in interrupt routine)
+		wiFiScanRunning = true;  // will be set to false in esp_wifi_scan_start (in interrupt routine)
+		if(esp_wifi_scan_start(&scanConf, true) != ESP_OK) { return false; } // BLOCKING, HERE BROWNOUT with tx power = 78 (*0.25 = 19.5dBm)
+		if(wiFiScanIncludesArray(ssids, wifiListSize, &foundArrayIdTemp, &foundOnChannelUnused)) { // this already returns highest priority (= lowest index)
+			if(debug && (foundArrayIdTemp == 0)) { printf("SCAN (ch %d): found 0 -> DIRECTLY RETURN\n", scanConf.channel); }
+			if(foundArrayIdTemp == 0) {	*foundOnChannel = scanConf.channel; *wifiArrayId = foundArrayIdTemp; return true; } // already found highest priority network, no need to continue
+			else {
+				if(!foundAtLeastOneInList) { // first time any wifi from the list was found -> this is best result so far
+					minimumWifiArrayId = foundArrayIdTemp;
+					minimumChannel = scanConf.channel;
+					foundAtLeastOneInList = true;
+					if(debug) { printf("SCAN (ch %d): found first id %d\n", scanConf.channel, minimumWifiArrayId); }
+				}
+				else { // another wifi from the list has already been found -> check if the priority of this here is higher
+					if(foundArrayIdTemp < minimumWifiArrayId) { // has higher priority, then use this
+						minimumWifiArrayId = foundArrayIdTemp;
+						minimumChannel = scanConf.channel;
+						if(debug) { printf("SCAN (ch %d): found id %d -> better than %d\n", scanConf.channel, foundArrayIdTemp, minimumWifiArrayId); }				
+					}
+					else if(debug) { printf("SCAN (ch %d): found id %d, but %d is better\n", scanConf.channel, foundArrayIdTemp, minimumWifiArrayId); }
+				}
+			}
+		}
+	}
+	/** FINISHED SCANNING (id = 0 = highest priority not found, but maybe another one) */
+	if(foundAtLeastOneInList) {
+		*foundOnChannel = minimumChannel;
+		*wifiArrayId = minimumWifiArrayId;
+	}
+	return true; // maybe not found but also no error
+}
+
+bool WildFiTagREV6::sniffWiFisOn1and6and11(uint8_t *scanData, uint32_t maxScanDataLength, uint32_t *actualScanDataLength, int8_t maxTxPower, uint32_t scanTimePerChannel) {
+	// PROBLEM: if scanTime != 120 and wifi on channel 6 or 1 -> will not be changed back to 120s!!!
+	const uint8_t CHANNEL_LIST[] = { 1, 6, 11 }; // scan first on channel 6 because highest probability
+	uint8_t CHANNEL_LIST_SIZE = sizeof(CHANNEL_LIST) / sizeof(CHANNEL_LIST[0]);
+	uint16_t number = DEFAULT_SCAN_LIST_SIZE;
+	wifi_ap_record_t ap_info[DEFAULT_SCAN_LIST_SIZE];
+	uint16_t ap_count = 0;
+	uint32_t spaceNeededForEntry = 0;
+
+	*actualScanDataLength = 0;
+	uint32_t scanDataPointer = 0;
+
+	if(!wiFiInitialized) { return false; }
+	wiFiScanRunning = true; // IMPORTANT: set this BEFORE esp_wifi_start -> because there it will be checked (trys to connect if false)
+    if(esp_wifi_start() != ESP_OK) { return false; }
+	esp_wifi_set_max_tx_power(maxTxPower); // ONLY WORKS AFTER esp_wifi_start, default = 78 (browns out) -> 52 * 0.25 = 13dBm works always
+
+	/** INIT */
+	wifi_active_scan_time_t scanTimeActive = {
+		.min = 0, // in ms per channel
+		.max = scanTimePerChannel // in ms per channel
+	};
+	wifi_scan_time_t scanTime = { };
+	scanTime.active = scanTimeActive;
+	wifi_scan_config_t scanConf = {
+        .ssid = NULL, // NULL = don't scan for specific SSID
+        .bssid = NULL, // NULL = don't scan for specific BSSID
+        .channel = 0, // 0 = all channel scan
+        .show_hidden = true, // show hidden wifis
+		.scan_type = WIFI_SCAN_TYPE_ACTIVE, // default = active scan (sends out beacon instead of passively waiting for one)
+		.scan_time = scanTime
+    };
+
+	/** SCAN CHANNELS */
+	for(uint8_t i = 0; i < CHANNEL_LIST_SIZE; i++) {
+		scanConf.channel = CHANNEL_LIST[i]; // modify channel
+		/*if(i == (CHANNEL_LIST_SIZE - 1)) { // IMPORTANT: last scan again 120ms long, because otherwise scan_time will be used also during connect (STUPID but TRUE!)
+			scanTime.active.max = 120; 
+			scanConf.scan_time = scanTime;
+		}*/
+		wiFiScanDone = false; // will be set to true in esp_wifi_scan_start (in interrupt routine)
+		wiFiScanRunning = true;  // will be set to false in esp_wifi_scan_start (in interrupt routine)
+		if(esp_wifi_scan_start(&scanConf, false) != ESP_OK) { return false; } // NOT blocking -> is faster!!!
+		while(!wiFiScanCompleted()) { ; }
+
+		memset(ap_info, 0, sizeof(ap_info));
+		if(esp_wifi_scan_get_ap_records(&number, ap_info) != ESP_OK) { return false; } // important, frees up memory from scanning
+		if(esp_wifi_scan_get_ap_num(&ap_count) != ESP_OK) { return false; }
+		printf("%d Total APs = %u\n", ((uint32_t) (Timing::millis())), ap_count);
+		for(int i = 0; (i < DEFAULT_SCAN_LIST_SIZE) && (i < ap_count); i++) {
+			printf("%02X:%02X:%02X:%02X:%02X:%02X, ", ap_info[i].bssid[0], ap_info[i].bssid[1], ap_info[i].bssid[2], ap_info[i].bssid[3], ap_info[i].bssid[4], ap_info[i].bssid[5]);
+			printf("SSID %s (%d), ", ap_info[i].ssid, strlen((const char*) (ap_info[i].ssid))); // should be max. 32 byte
+			printf("RSSI %d, ", ap_info[i].rssi);
+			printf("CH %d, ", ap_info[i].primary);
+
+			spaceNeededForEntry = 1 + 6 + 1 + strlen((const char*) (ap_info[i].ssid));
+			if(scanDataPointer + spaceNeededForEntry > maxScanDataLength) { return false; } // TODO: TEST
+			if(spaceNeededForEntry > 255) { return false; }
+			if(ap_info[i].rssi < 0) { ap_info[i].rssi = -ap_info[i].rssi; }
+			scanData[scanDataPointer+0] = (uint8_t) spaceNeededForEntry;
+			scanData[scanDataPointer+1] = ap_info[i].bssid[0];
+			scanData[scanDataPointer+2] = ap_info[i].bssid[1];
+			scanData[scanDataPointer+3] = ap_info[i].bssid[2];
+			scanData[scanDataPointer+4] = ap_info[i].bssid[3];
+			scanData[scanDataPointer+5] = ap_info[i].bssid[4];
+			scanData[scanDataPointer+6] = ap_info[i].bssid[5];
+			scanData[scanDataPointer+7] = (uint8_t) ap_info[i].rssi;
+			scanDataPointer += 8;
+			for(uint16_t j = 0; j < 255; j++) {
+				if(ap_info[i].ssid[j] == 0) { break; }
+				scanData[scanDataPointer] = ap_info[i].ssid[j];
+				scanDataPointer++;
+			}
+			*actualScanDataLength = scanDataPointer;
+
+			printf("Space %d, %d\n", spaceNeededForEntry, *actualScanDataLength);
+		}
+	}
+	return true;
+}
+
 bool WildFiTagREV6::scanForWiFisOn1and6and11(const char** ssids, const uint8_t wifiListSize, uint8_t *wifiArrayId, uint8_t *foundOnChannel, int8_t maxTxPower, uint32_t scanTimePerChannel1and6, uint16_t timeoutScanMs) {
 	// PROBLEM: if scanTime != 120 and wifi on channel 6 or 1 -> will not be changed back to 120s!!!
 	const uint8_t CHANNEL_LIST[] = { 6, 1, 11 }; // scan first on channel 6 because highest probability
@@ -2589,8 +3231,9 @@ uint8_t WildFiTagREV6::printWiFiScanResults() {
     if(esp_wifi_scan_get_ap_num(&ap_count) != ESP_OK) {
 		return 255;
 	}
-    printf("Total APs = %u\n", ap_count);
+    printf("%d Total APs = %u\n", ((uint32_t) (Timing::millis())), ap_count);
     for(int i = 0; (i < DEFAULT_SCAN_LIST_SIZE) && (i < ap_count); i++) {
+		printf("%02X:%02X:%02X:%02X:%02X:%02X, ", ap_info[i].bssid[0], ap_info[i].bssid[1], ap_info[i].bssid[2], ap_info[i].bssid[3], ap_info[i].bssid[4], ap_info[i].bssid[5]);
         printf("SSID %s, ", ap_info[i].ssid);
         printf("RSSI %d, ", ap_info[i].rssi);
         //print_auth_mode(ap_info[i].authmode);
@@ -2853,7 +3496,7 @@ esp_err_t httpEventHandler(esp_http_client_event_t *evt) {
 				}
 				// check voltage
 				if(((messageCounter - 1) % ESP_NOW_FLASH_STREAM_VOLTAGE_CHECK_EVERY_X_MESSAGES) == (ESP_NOW_FLASH_STREAM_VOLTAGE_CHECK_EVERY_X_MESSAGES - 1)) {
-					uint16_t currentVoltage = readSupplyVoltage();
+					uint16_t currentVoltage = readSupplyVoltage(true);
 					if(debugLvl > 1) { printf("NOW-STREAM: voltage check %d (min: %d)\n", currentVoltage, minBatteryVoltageToContinue); }
 					if(currentVoltage < minBatteryVoltageToContinue) { // check current voltage
 						if(debugLvl > 0) { printf("NOW-STREAM: voltage low, stop\n"); }
@@ -3029,7 +3672,7 @@ esp_now_stream_status_t WildFiTagREV6::doESPNOWFlashStream(uint8_t *macAddress, 
 			}
 			else {
 				delay(millisBetweenBlocks); // give everybody, especially the flash, a bit time to breath
-				uint16_t currentVoltage = readSupplyVoltage();
+				uint16_t currentVoltage = readSupplyVoltage(true);
 				if(debug) { printf("NOW-STREAM: current voltage %d (min: %d)\n", currentVoltage, minBatteryVoltageToContinue); }
 				if(currentVoltage < minBatteryVoltageToContinue) { // check current voltage
 					if(debug) { printf("NOW-STREAM: voltage low, stop\n"); }
@@ -3258,7 +3901,7 @@ esp_now_stream_status_t WildFiTagREV6::doESPNOWFlashStreamNew(uint8_t *macAddres
 			
 			// check voltage
 			if(((messageCounter - 1) % ESP_NOW_FLASH_STREAM_VOLTAGE_CHECK_EVERY_X_MESSAGES) == (ESP_NOW_FLASH_STREAM_VOLTAGE_CHECK_EVERY_X_MESSAGES - 1)) {
-				uint16_t currentVoltage = readSupplyVoltage();
+				uint16_t currentVoltage = readSupplyVoltage(true);
 				if(debugLvl > 1) { printf("NOW-STREAM: voltage check %d (min: %d)\n", currentVoltage, minBatteryVoltageToContinue); }
 				if(currentVoltage < minBatteryVoltageToContinue) { // check current voltage
 					if(debugLvl > 0) { printf("NOW-STREAM: voltage low, stop\n"); }
@@ -3330,12 +3973,15 @@ static void restPostStreamFlashTaskFullBlocks(void *pvParameters) {
     esp_http_client_set_url(client, taskParams.url);
     esp_http_client_set_method(client, HTTP_METHOD_POST);
     esp_http_client_set_header(client, "Content-Type", taskParams.contentType);
-	if((taskParams.additionalHeaderKey != NULL) && (taskParams.additionalHeaderValue != NULL)) {
-		esp_http_client_set_header(client, taskParams.additionalHeaderKey, taskParams.additionalHeaderValue);
+	if((taskParams.additionalHeaderKey1 != NULL) && (taskParams.additionalHeaderValue1 != NULL)) {
+		esp_http_client_set_header(client, taskParams.additionalHeaderKey1, taskParams.additionalHeaderValue1);
+	}
+	if((taskParams.additionalHeaderKey2 != NULL) && (taskParams.additionalHeaderValue2 != NULL)) {
+		esp_http_client_set_header(client, taskParams.additionalHeaderKey2, taskParams.additionalHeaderValue2);
 	}
 
 	// sample first time current voltage:
-	currentVoltage = (taskParams.deviceObject)->readSupplyVoltage();
+	currentVoltage = (taskParams.deviceObject)->readSupplyVoltage(true);
 	// reserve memory for PREFIX (copy into separate )
 	restPrefixPointer = (char *) malloc(strlen(taskParams.prefix) + 1); // +1 for terminating zero! otherwise system crash
 	strcpy(restPrefixPointer, taskParams.prefix);
@@ -3387,8 +4033,17 @@ static void restPostStreamFlashTaskFullBlocks(void *pvParameters) {
 			goto exit;
 		}
 		// modify prefix data (if configured)
-		if(taskParams.constructCustomPrefix) { // requires following format: ABCDEF:PPPPPPPP:VVVV: (strlen = 21 Bytes, pagepointer index 7, voltage index )
+		if(taskParams.constructCustomPrefix) { // requires following format: MMMMMM:PPPPPPPP:VVVV: (strlen = 21 Bytes, pagepointer index 7, voltage index )
 			if(strlen(restPrefixPointer) >= 21) {
+				uint8_t myMac[6] = { 0 };
+				const char hexchars[17] = "0123456789ABCDEF";
+				esp_efuse_mac_get_default(myMac);
+				restPrefixPointer[0] = hexchars[(myMac[3] >> 4) & 0xF];
+				restPrefixPointer[1] = hexchars[(myMac[3] >> 0) & 0xF];
+				restPrefixPointer[2] = hexchars[(myMac[4] >> 4) & 0xF];
+				restPrefixPointer[3] = hexchars[(myMac[4] >> 0) & 0xF];
+				restPrefixPointer[4] = hexchars[(myMac[5] >> 4) & 0xF];
+				restPrefixPointer[5] = hexchars[(myMac[5] >> 0) & 0xF];
 				HelperBits::addInt32AsHexToCharArray(restPrefixPointer, 7, currentFlashPage);
 				HelperBits::addInt16AsHexToCharArray(restPrefixPointer, 16, currentVoltage);
 			}
@@ -3474,8 +4129,8 @@ static void restPostStreamFlashTaskFullBlocks(void *pvParameters) {
 		// check response
 		int statusCode = esp_http_client_get_status_code(client);
 		if(taskParams.debug) { printf("POST: status = %d\n", statusCode); }
-		if(statusCode != 201) { // if one POST call didn't go through -> cancel whole operation (but wiFiPostStreamBlocksSuccessfullyTransmitted might transmitted successfully partly)
-			if(taskParams.debug) { printf("POST: error, status code != 201\n"); }
+		if((statusCode != 201) && (statusCode != 200)) { // if one POST call didn't go through -> cancel whole operation (but wiFiPostStreamBlocksSuccessfullyTransmitted might transmitted successfully partly)
+			if(taskParams.debug) { printf("POST: error, status code != 201 or 200\n"); }
 			if(statusCode == -1) {
 				wiFiPostDataStatus = HTTP_POST_DATA_ERROR_RET_CODE_MIN1;
 			}
@@ -3483,16 +4138,16 @@ static void restPostStreamFlashTaskFullBlocks(void *pvParameters) {
 				wiFiPostDataStatus = HTTP_POST_DATA_ERROR_RET_CODE_100;
 			}
 			else if((statusCode >= 200) && (statusCode < 300)) {
-				wiFiPostDataStatus = HTTP_POST_DATA_ERROR_RET_CODE_200; // 200-something but not 201
+				wiFiPostDataStatus = HTTP_POST_DATA_ERROR_RET_CODE_200; // 200-something but not 200/201
 			}
 			else if((statusCode >= 400) && (statusCode < 400)) {
-				wiFiPostDataStatus = HTTP_POST_DATA_ERROR_RET_CODE_400; // 200-something but not 201
+				wiFiPostDataStatus = HTTP_POST_DATA_ERROR_RET_CODE_400; // 200-something but not 200/201
 			}
 			else if((statusCode >= 500) && (statusCode < 500)) {
-				wiFiPostDataStatus = HTTP_POST_DATA_ERROR_RET_CODE_500; // 200-something but not 201
+				wiFiPostDataStatus = HTTP_POST_DATA_ERROR_RET_CODE_500; // 200-something but not 200/201
 			}
 			else {
-				wiFiPostDataStatus = HTTP_POST_DATA_ERROR_RET_CODE_UNKNOWN; // 200-something but not 201
+				wiFiPostDataStatus = HTTP_POST_DATA_ERROR_RET_CODE_UNKNOWN; // 200-something but not 200/201
 			}
 			if(useBase64Encoding) { freeMemoryPOSTData(payloadData); }
 			esp_http_client_cleanup(client);
@@ -3508,7 +4163,7 @@ static void restPostStreamFlashTaskFullBlocks(void *pvParameters) {
 		bool doneSendingAllBlocks = (multipleBlockIterator == (taskParams.flashMaxNumberOfBlocksToTransmit - 1));
         if(!doneSendingAllBlocks) {
 			Timing::delay(100); // add delay to give battery voltage some time to breath (don't delay if last block)
-			currentVoltage = (taskParams.deviceObject)->readSupplyVoltage();
+			currentVoltage = (taskParams.deviceObject)->readSupplyVoltage(true);
 			if(taskParams.debug) { printf("POST: current voltage %d (min: %d)\n", currentVoltage, taskParams.minBatteryVoltageToContinue); }
 			if(currentVoltage < taskParams.minBatteryVoltageToContinue) {
 				if(taskParams.debug) { printf("POST: error, voltage too low to continue sending more blocks\n"); }
@@ -3576,12 +4231,15 @@ static void restPostStreamFlashTaskHalfBlocks(void *pvParameters) {
     esp_http_client_set_url(client, taskParams.url);
     esp_http_client_set_method(client, HTTP_METHOD_POST);
     esp_http_client_set_header(client, "Content-Type", taskParams.contentType);
-	if((taskParams.additionalHeaderKey != NULL) && (taskParams.additionalHeaderValue != NULL)) {
-		esp_http_client_set_header(client, taskParams.additionalHeaderKey, taskParams.additionalHeaderValue);
+	if((taskParams.additionalHeaderKey1 != NULL) && (taskParams.additionalHeaderValue1 != NULL)) {
+		esp_http_client_set_header(client, taskParams.additionalHeaderKey1, taskParams.additionalHeaderValue1);
+	}
+	if((taskParams.additionalHeaderKey2 != NULL) && (taskParams.additionalHeaderValue2 != NULL)) {
+		esp_http_client_set_header(client, taskParams.additionalHeaderKey2, taskParams.additionalHeaderValue2);
 	}
 	
 	// sample first time current voltage:
-	currentVoltage = (taskParams.deviceObject)->readSupplyVoltage();
+	currentVoltage = (taskParams.deviceObject)->readSupplyVoltage(true);
 	
 	// reserve memory for PREFIX (copy into separate )
 	restPrefixPointer = (char *) malloc(strlen(taskParams.prefix) + 1); // +1 for terminating zero! otherwise system crash
@@ -3636,8 +4294,17 @@ static void restPostStreamFlashTaskHalfBlocks(void *pvParameters) {
 				goto exit;
 			}
 			// modify prefix data (if configured)
-			if(taskParams.constructCustomPrefix) { // requires following format: ABCDEF:PPPPPPPP:VVVV: (strlen = 21 Bytes, pagepointer index 7, voltage index )
+			if(taskParams.constructCustomPrefix) { // requires following format: MMMMMM:PPPPPPPP:VVVV: (strlen = 21 Bytes, pagepointer index 7, voltage index )
 				if(strlen(restPrefixPointer) >= 21) {
+					uint8_t myMac[6] = { 0 };
+					const char hexchars[17] = "0123456789ABCDEF";
+					esp_efuse_mac_get_default(myMac);
+					restPrefixPointer[0] = hexchars[(myMac[3] >> 4) & 0xF];
+					restPrefixPointer[1] = hexchars[(myMac[3] >> 0) & 0xF];
+					restPrefixPointer[2] = hexchars[(myMac[4] >> 4) & 0xF];
+					restPrefixPointer[3] = hexchars[(myMac[4] >> 0) & 0xF];
+					restPrefixPointer[4] = hexchars[(myMac[5] >> 4) & 0xF];
+					restPrefixPointer[5] = hexchars[(myMac[5] >> 0) & 0xF];
                     HelperBits::addInt32AsHexToCharArray(restPrefixPointer, 7, currentFlashPage);
                     HelperBits::addInt16AsHexToCharArray(restPrefixPointer, 16, currentVoltage);
                 }
@@ -3720,8 +4387,8 @@ static void restPostStreamFlashTaskHalfBlocks(void *pvParameters) {
 			// check response
 			int statusCode = esp_http_client_get_status_code(client);
 			if(taskParams.debug) { printf("POST: status code = %d\n", statusCode); }
-			if(statusCode != 201) { // if one POST call didn't go through -> cancel whole operation (but wiFiPostStreamBlocksSuccessfullyTransmitted might transmitted successfully partly)
-				if(taskParams.debug) { printf("POST: error, status code != 201\n"); }
+			if((statusCode != 201) && (statusCode != 200)) { // if one POST call didn't go through -> cancel whole operation (but wiFiPostStreamBlocksSuccessfullyTransmitted might transmitted successfully partly)
+				if(taskParams.debug) { printf("POST: error, status code != 200 or 201\n"); }
 				if(statusCode == -1) {
 					wiFiPostDataStatus = HTTP_POST_DATA_ERROR_RET_CODE_MIN1;
 				}
@@ -3729,16 +4396,16 @@ static void restPostStreamFlashTaskHalfBlocks(void *pvParameters) {
 					wiFiPostDataStatus = HTTP_POST_DATA_ERROR_RET_CODE_100;
 				}
 				else if((statusCode >= 200) && (statusCode < 300)) {
-					wiFiPostDataStatus = HTTP_POST_DATA_ERROR_RET_CODE_200; // 200-something but not 201
+					wiFiPostDataStatus = HTTP_POST_DATA_ERROR_RET_CODE_200; // 200-something but not 200/201
 				}
 				else if((statusCode >= 400) && (statusCode < 400)) {
-					wiFiPostDataStatus = HTTP_POST_DATA_ERROR_RET_CODE_400; // 200-something but not 201
+					wiFiPostDataStatus = HTTP_POST_DATA_ERROR_RET_CODE_400; // 200-something but not 200/201
 				}
 				else if((statusCode >= 500) && (statusCode < 500)) {
-					wiFiPostDataStatus = HTTP_POST_DATA_ERROR_RET_CODE_500; // 200-something but not 201
+					wiFiPostDataStatus = HTTP_POST_DATA_ERROR_RET_CODE_500; // 200-something but not 200/201
 				}
 				else {
-					wiFiPostDataStatus = HTTP_POST_DATA_ERROR_RET_CODE_UNKNOWN; // 200-something but not 201
+					wiFiPostDataStatus = HTTP_POST_DATA_ERROR_RET_CODE_UNKNOWN; // 200-something but not 200/201
 				}
 				if(useBase64Encoding) { freeMemoryPOSTData(payloadData); }
 				esp_http_client_cleanup(client);
@@ -3767,7 +4434,7 @@ static void restPostStreamFlashTaskHalfBlocks(void *pvParameters) {
 		bool doneSendingAllBlocks = (multipleBlockIterator == (taskParams.flashMaxNumberOfBlocksToTransmit - 1));
         if(!doneSendingAllBlocks) {
         	Timing::delay(100); // add delay to give battery voltage some time to breath (don't delay if last block)
-			currentVoltage = (taskParams.deviceObject)->readSupplyVoltage();
+			currentVoltage = (taskParams.deviceObject)->readSupplyVoltage(true);
 			if(taskParams.debug) { printf("POST: current voltage %d (min: %d)\n", currentVoltage, taskParams.minBatteryVoltageToContinue); }
 			if(currentVoltage < taskParams.minBatteryVoltageToContinue) {
 				if(taskParams.debug) { printf("POST: error, voltage too low to continue sending more blocks\n"); }
@@ -4081,7 +4748,7 @@ bool WildFiTagREV6::getNTPTimestampUTC(bool storeInRTC, uint32_t &timestampUTC, 
 
 /** ----- BLE ----- */
 
-void WildFiTagREV6::printOwnBLEAddress() {
+/*void WildFiTagREV6::printOwnBLEAddress() {
 	printf("BLE ADDR: %llX\n", myBLEAddress);
 }
 
@@ -4114,7 +4781,7 @@ static ble_msg_type_t checkIfBiologgerBeacon(uint8_t *dataBeacon, uint8_t len, u
 	}
 	biologgerId = 0xFFFF;
 	return BLE_MSG_DONT_CARE;
-}
+}*/
 
 /*static uint64_t decodeBLEmacAddress(struct ble_gap_event *e) {
 	uint64_t temp;
@@ -4127,7 +4794,7 @@ static ble_msg_type_t checkIfBiologgerBeacon(uint8_t *dataBeacon, uint8_t len, u
 	return result;
 }*/
 
-static void decodeBLEBeacon(struct ble_gap_event *e) {
+/*static void decodeBLEBeacon(struct ble_gap_event *e) {
 	// BLE Header (2 Byte)
 	// BLE MAC Address (6 Byte) = e->disc.addr.val
 	// Flags (3 Byte)
@@ -4238,9 +4905,9 @@ static void bleAdvertise() {
 	
     rc = ble_gap_adv_start(ownAddressType, NULL, BLE_HS_FOREVER, &adv_params, NULL, NULL); // start advertising forever, no direct address, no event callback because unconnectable
     assert(rc == 0);
-}
+}*/
 
-static void bleOnSync() {
+/*static void bleOnSync() {
     uint8_t rc;
     rc = ble_hs_id_infer_auto(0, &ownAddressType); // get BLE device address (unique for certain ESP32)
     if (rc != 0) { // error getting address type
@@ -4349,14 +5016,14 @@ int8_t WildFiTagREV6::getBLERSSIAverage(uint16_t index) {
 		return ret;
 	}
 	return 0;
-}
+}*/
 
-uint16_t WildFiTagREV6::getBLEBeaconCnt(uint16_t index) {
+/*uint16_t WildFiTagREV6::getBLEBeaconCnt(uint16_t index) {
 	if(checkBLEOkay(index)) {
 		return bleRXBuffer.beaconCnt[index];
 	}
 	return 0;
-}
+}*/
 
 /*uint64_t WildFiTagREV6::getBLEMacAddress(uint16_t index) {
 	if(checkBLEOkay(index)) {
@@ -4365,32 +5032,32 @@ uint16_t WildFiTagREV6::getBLEBeaconCnt(uint16_t index) {
 	return 0;
 }*/
 
-uint8_t WildFiTagREV6::getBLEPayloadLen(uint16_t index) {
+/*uint8_t WildFiTagREV6::getBLEPayloadLen(uint16_t index) {
 	if(checkBLEOkay(index)) {
 		return bleRXBuffer.payloadLen[index];
 	}
 	return 0;
-}
+}*/
 
-uint8_t WildFiTagREV6::getBLEPayload(uint16_t deviceIndex, uint8_t byteIndex) {
+/*uint8_t WildFiTagREV6::getBLEPayload(uint16_t deviceIndex, uint8_t byteIndex) {
 	if(checkBLEOkay(deviceIndex)) {
 		if(byteIndex < BLE_BEACON_MAX_DATA) {
 			return bleRXBuffer.payload[deviceIndex][byteIndex];
 		}
 	}
 	return 0;
-}
+}*/
 
-uint16_t WildFiTagREV6::getBLEBiologgerId(uint16_t index) {
+/*uint16_t WildFiTagREV6::getBLEBiologgerId(uint16_t index) {
 	if(checkBLEOkay(index)) {
 		return bleRXBuffer.biologgerId[index];
 	}
 	return 0;
-}
+}*/
 
 /** ----- MAGNETOMETER CALIBRATION ----- */
-bool WildFiTagREV6::magnetometerCalibrationMode(uint16_t durationSeconds, mag_calibration_t *calibrationData, bmm150_trim_registers *trimDataIn) {
-	mag_config_t magConf = { BMX160_MAG_ODR_12_5HZ, BMX160_MAG_ACCURACY_REGULAR };
+bool WildFiTagREV6::magnetometerCalibrationMode(uint16_t durationSeconds, mag_calibration_t *calibrationData, uint8_t magFrequency, uint8_t magAccuracy, bool blink) {
+	mag_config_t magConf = { magFrequency, magAccuracy };
 	struct BMX160Data magData;
 	int16_t x, y, z;
 	uint16_t hallData = 0;
@@ -4399,20 +5066,28 @@ bool WildFiTagREV6::magnetometerCalibrationMode(uint16_t durationSeconds, mag_ca
 	limitTime *= 1000;
 	bool firstSample = true;
 	uint64_t sampleCnt = 0;
+	bool allOkay = true;
+	bmm150_trim_registers trimDataIn = {}; 
+
+	// reading trim data (possibly again, but had bug where trimData was passed as zero)
+    if(!imu.magCompensateReadTrimData(&trimDataIn)) { return false; }
+	delay(50);
 
 	if(!imu.start(NULL, &magConf, NULL, BMX160_LATCH_DUR_5_MILLI_SEC)) { return false; }
-	ledGreenOn();
 	//setCPUSpeed(ESP32_10MHZ);
 	delay(500); // IMPORTANT: otherwise reading schmu data
 	startTime = Timing::millis();
 
+	if(blink) { ledRedOn(); }
 	while((Timing::millis() - startTime) < limitTime) {
 		while(!imu.magDataReady()) { delay(10); }
-		if(!imu.getData(NULL, &magData, NULL, &hallData)) { break; }
+		if(!imu.getData(NULL, &magData, NULL, &hallData)) { allOkay = false; break; }
 
-		x = imu.magCompensateXandConvertToMicroTesla(magData.x, hallData, trimDataIn);
-		y = imu.magCompensateYandConvertToMicroTesla(magData.y, hallData, trimDataIn);
-		z = imu.magCompensateZandConvertToMicroTesla(magData.z, hallData, trimDataIn);
+		x = imu.magCompensateXandConvertToMicroTeslaX16(magData.x, hallData, &trimDataIn);
+		y = imu.magCompensateYandConvertToMicroTeslaX16(magData.y, hallData, &trimDataIn);
+		z = imu.magCompensateZandConvertToMicroTeslaX16(magData.z, hallData, &trimDataIn);
+
+		if((x == BMM150_OVERFLOW_OUTPUT) || (y == BMM150_OVERFLOW_OUTPUT) || (z == BMM150_OVERFLOW_OUTPUT) || (z == BMM150_POSITIVE_SATURATION_Z) || (z == BMM150_NEGATIVE_SATURATION_Z)) { allOkay = false; break; }
 
 		if(firstSample) {
 			calibrationData->xMin = x;
@@ -4434,17 +5109,17 @@ bool WildFiTagREV6::magnetometerCalibrationMode(uint16_t durationSeconds, mag_ca
 		sampleCnt++;
 		shortLightSleep(100);
 	}
-	printf("Sample cnt: %llu in %d seconds\n", sampleCnt, durationSeconds);
+	if(blink) { ledRedOff(); }
+	//printf("Sample cnt: %llu in %d seconds\n", sampleCnt, durationSeconds);
 	//setCPUSpeed(ESP32_80MHZ);
 	//delay(100);
-	ledGreenOff();
-	return true;
+	return allOkay;
 }
 
 /** ----- WAKE STUB ----- */
 RTC_DATA_ATTR bool (*wakeStubFunctionPointer)();
 RTC_DATA_ATTR bool useCustomWakeStubFunction = false;
-RTC_DATA_ATTR bool wakeStubNoBootIfVoltageLow = true;
+RTC_DATA_ATTR bool wakeStubNoBootIfVoltageLow = false;
 RTC_DATA_ATTR uint8_t interruptToWakeUpAgainWakeStub = USE_EXT0_IF_WAKE_UP_REJECTED;
 
 void WildFiTagREV6::customWakeStubFunction(bool (*f)()) {
@@ -4452,8 +5127,8 @@ void WildFiTagREV6::customWakeStubFunction(bool (*f)()) {
 	useCustomWakeStubFunction = true;
 }
 
-void WildFiTagREV6::disableWakeStubNoBootIfVoltageLow() {
-	wakeStubNoBootIfVoltageLow = false;
+void WildFiTagREV6::enableWakeStubNoBootIfVoltageLow() {
+	wakeStubNoBootIfVoltageLow = true;
 }
 
 void WildFiTagREV6::setWakeStubRejectionInterruptSrc(uint8_t interruptSrc) {
@@ -4519,11 +5194,11 @@ void RTC_IRAM_ATTR adc1_get_raw_ram(adc1_channel_t channel) {
     SENS.sar_meas_start1.meas1_start_sar = 0;
     SENS.sar_meas_start1.meas1_start_sar = 1;
     while (SENS.sar_meas_start1.meas1_done_sar == 0); // wait until measurement done
-    adcValue = SENS.sar_meas_start1.meas1_data_sar; // set adc value!
+    batteryVoltageWakeStub = SENS.sar_meas_start1.meas1_data_sar; // set adc value!
 	
-	adcValue = (((adcCoeffA * adcValue) + LIN_COEFF_A_ROUND_ESP) / LIN_COEFF_A_SCALE_ESP) + adcCoeffB; // calculate real V_BATT (with coefficients calculated by compensation algo before deep sleep)
-	adcValue = (adcValue * (BATT_VOLT_RES_1 + BATT_VOLT_RES_2)) / BATT_VOLT_RES_2; // scale to V_BATT
-	adcValue -= STRANGE_VBATT_OFFSET;
+	batteryVoltageWakeStub = (((adcCoeffA * batteryVoltageWakeStub) + LIN_COEFF_A_ROUND_ESP) / LIN_COEFF_A_SCALE_ESP) + adcCoeffB; // calculate real V_BATT (with coefficients calculated by compensation algo before deep sleep)
+	batteryVoltageWakeStub = (batteryVoltageWakeStub * (BATT_VOLT_RES_1 + BATT_VOLT_RES_2)) / BATT_VOLT_RES_2; // scale to V_BATT
+	batteryVoltageWakeStub -= STRANGE_VBATT_OFFSET;
 
     SENS.sar_meas_wait2.force_xpd_sar = SENS_FORCE_XPD_SAR_PD; // adc power off
 }
@@ -4568,7 +5243,7 @@ void RTC_IRAM_ATTR esp_wake_deep_sleep(void) {
 	
 	// check conditions that might prevent boot
 	if((wakeStubNoBootIfVoltageLow)
-		&& (adcValue < V_BATT_MINIMUM_FOR_BOOT)) {
+		&& (batteryVoltageWakeStub < V_BATT_MINIMUM_FOR_BOOT)) {
 		do_not_boot = true;	
 	}
 	else if(useCustomWakeStubFunction) {

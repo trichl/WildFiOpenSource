@@ -621,6 +621,50 @@ bool IMU_BMX160::enableAccAnyMotionInterruptXYZ(uint8_t duration, uint8_t thresh
 	return !error;
 }
 
+bool IMU_BMX160::enableAccSignificantMotionInterruptXYZ(uint8_t threshold, uint8_t skipTime, uint8_t proofTime) {
+	bool error = false;
+	uint8_t temp;
+	if(skipTime > 0b11) {
+		return false;
+	}
+	if(proofTime > 0b11) {
+		return false;
+	}
+	temp = (skipTime << 2) | (proofTime << 4) | 0b10;
+
+	error |= !i2c.writeRegister(IMU_BMX160_ADDRESS, BMX160_INT_MOTION_1_ADDR, threshold); // set threshold, depends on range, @2G: threshold*3.91mg
+	error |= !i2c.writeRegister(IMU_BMX160_ADDRESS, BMX160_INT_MOTION_3_ADDR, temp); // set skipTime and proofTime, use SignificantMotion instead of AnyMotion
+
+	temp = i2c.readRegister(IMU_BMX160_ADDRESS, BMX160_INT_ENABLE_0_ADDR, error);
+	temp |= 0b00000111; // enable SignificantMotion interrupt (same as AnyMotion) on x, y, z
+	error |= !i2c.writeRegister(IMU_BMX160_ADDRESS, BMX160_INT_ENABLE_0_ADDR, temp);
+	
+	temp = i2c.readRegister(IMU_BMX160_ADDRESS, BMX160_INT_MAP_0_ADDR, error);
+	temp |= 0b00000100; // bit 2: map INT1 to SignificantMotion interrupt (same as AnyMotion)
+	error |= !i2c.writeRegister(IMU_BMX160_ADDRESS, BMX160_INT_MAP_0_ADDR, temp);
+	
+	error |= !i2c.writeRegister(IMU_BMX160_ADDRESS, BMX160_INT_OUT_CTRL_ADDR, 0b00001010); // INT1 output enable, push-pull, active-high
+	
+	return !error;
+}
+
+bool IMU_BMX160::enableAccAnyMotionInterruptXYZWithoutPin(uint8_t duration, uint8_t threshold) {
+	bool error = false;
+	uint8_t temp;
+	if(duration > 0b11) {
+		return false;
+	}
+	
+	error |= !i2c.writeRegister(IMU_BMX160_ADDRESS, BMX160_INT_MOTION_0_ADDR, duration); // set duration (only last 2 bits, others are overwritten with 0)
+	error |= !i2c.writeRegister(IMU_BMX160_ADDRESS, BMX160_INT_MOTION_1_ADDR, threshold); // set threshold, depends on range, @2G: threshold*3.91mg
+
+	temp = i2c.readRegister(IMU_BMX160_ADDRESS, BMX160_INT_ENABLE_0_ADDR, error);
+	temp |= 0b00000111; // enable anymotion interrupt on x, y, z
+	error |= !i2c.writeRegister(IMU_BMX160_ADDRESS, BMX160_INT_ENABLE_0_ADDR, temp);
+	
+	return !error;
+}
+
 uint8_t IMU_BMX160::anyMotionInterruptAxis() {
 	// TODO (maybe): could also get slope direction (negativ or positive) = int_anym_sign
 	bool error;
@@ -833,7 +877,7 @@ bool IMU_BMX160::start(acc_config_t *accConf, mag_config_t *magConf, gyro_config
 	Timing::delay(10);
 	
 	// LATCH for interrupts (CHANGE triggers interrupt two times)
-	if((magConf != NULL) || (gyroConf != NULL) || (magConf != NULL)) { // only change if one of the sensors is actually turned on
+	if((accConf != NULL) || (gyroConf != NULL) || (magConf != NULL)) { // only change if one of the sensors is actually turned on
 		error |= !i2c.writeRegister(IMU_BMX160_ADDRESS, BMX160_INT_LATCH_ADDR, interruptLatch);
 	}
 	
@@ -1032,7 +1076,187 @@ bool IMU_BMX160::printFifoData(uint8_t *fifoData, uint16_t fifoLen, bmx160_fifo_
 	return true;
 }
 
-bool IMU_BMX160::magCompensateFifoData(uint8_t *fifoData, uint16_t fifoLen, bmx160_fifo_dataset_len_t datasetLen, bmm150_trim_registers *trimDataIn) {
+uint32_t IMU_BMX160::calculateFifoActivity(uint8_t *fifoData, uint16_t fifoLen, bool withMag, bool withGyro, uint8_t accelRange, uint32_t minimumMilliG, bool debug) {
+	uint16_t iterator = 0;
+	int16_t accX = 0, accY = 0, accZ = 0;
+	float accXConv = 0.0; float accYConv = 0.0; float accZConv = 0.0;
+	uint16_t datasetLen = 0;
+	uint32_t vectorSum = 0; // in mg
+	uint32_t vectorLength = 0; // in mg
+	float temp = 0; // in G
+	uint32_t sampleCnt = 0;
+	if((!withMag) && (!withGyro)) { datasetLen = 6; }
+	else if((withMag) && (!withGyro)) { datasetLen = 14; }
+	else if((withMag) && (withGyro)) { datasetLen = 20; }
+	while(true) {
+		if(iterator + datasetLen > fifoLen) { break; }
+		iterator += (datasetLen - 6); // skip mag and gyro data
+
+		accX = (int16_t) ((fifoData[iterator+1] << 8) | fifoData[iterator]); iterator += 2;
+		accY = (int16_t) ((fifoData[iterator+1] << 8) | fifoData[iterator]); iterator += 2;
+		accZ = (int16_t) ((fifoData[iterator+1] << 8) | fifoData[iterator]); iterator += 2;
+
+		accXConv = accRawToG(accX, accelRange); // in G
+		accYConv = accRawToG(accY, accelRange); // in G
+		accZConv = accRawToG(accZ, accelRange); // in G
+		
+		temp = sqrt((accXConv * accXConv) + (accYConv * accYConv) + (accZConv * accZConv)); // calculate vector length
+		temp = temp - 1.0f; // substract earth gravitation
+		if(temp < 0) { temp = temp * (-1.0f); } // get absolute value
+		vectorLength = (uint32_t) (temp * 1000.0f); // vector length in mg
+		if(vectorLength >= minimumMilliG) { // IMPORTANT: only adding if more than minimumMilliG mg, datasheet states Zero-g offset of +/-40mg on board level
+			vectorSum += vectorLength;
+		}
+
+		if(debug) { printf("calculateFifoActivity: %d: %05f, %05f, %05f -> mG: %d, %d\n", sampleCnt, accXConv, accYConv, accZConv, vectorLength, vectorSum); }
+		sampleCnt++;
+	}
+	if(sampleCnt > 0) { vectorSum = vectorSum / sampleCnt; } // average of samples [ above minimumMilliG mg ] in mg
+	return vectorSum;
+}
+
+uint32_t IMU_BMX160::calculateFifoODBAAverage(uint8_t *fifoData, uint16_t fifoLen, bool withMag, bool withGyro, uint8_t accelRange, bool debug) {
+	uint16_t iterator = 0;
+	int16_t accX = 0, accY = 0, accZ = 0;
+	float accXConv = 0.0; float accYConv = 0.0; float accZConv = 0.0;
+	float accXMean = 0.0; float accYMean = 0.0; float accZMean = 0.0;
+	float odba = 0;
+	uint32_t odbaInt = 0;
+	uint16_t datasetLen = 0;
+	uint32_t sampleCnt = 0;
+	if((!withMag) && (!withGyro)) { datasetLen = 6; }
+	else if((withMag) && (!withGyro)) { datasetLen = 14; }
+	else if((withMag) && (withGyro)) { datasetLen = 20; }
+
+	// step 1: calculate average of X, Y and Z
+	while(true) {
+		if(iterator + datasetLen > fifoLen) { break; }
+		iterator += (datasetLen - 6); // skip mag and gyro data
+		accX = (int16_t) ((fifoData[iterator+1] << 8) | fifoData[iterator]); iterator += 2;
+		accY = (int16_t) ((fifoData[iterator+1] << 8) | fifoData[iterator]); iterator += 2;
+		accZ = (int16_t) ((fifoData[iterator+1] << 8) | fifoData[iterator]); iterator += 2;
+		accXMean += accRawToG(accX, accelRange); // in G
+		accYMean += accRawToG(accY, accelRange); // in G
+		accZMean += accRawToG(accZ, accelRange); // in G
+		sampleCnt++;
+	}
+	if(sampleCnt > 0) {
+		accXMean = accXMean / sampleCnt;
+		accYMean = accYMean / sampleCnt;
+		accZMean = accZMean / sampleCnt;
+	}
+	else { return 0; } // should not happen
+	if(debug) { printf("calculateFifoODBA: mean: %.5f/%.5f/%.5f\n", accXMean, accYMean, accZMean); }
+
+	// step 2: calculate odba
+	iterator = 0;
+	while(true) {
+		if(iterator + datasetLen > fifoLen) { break; }
+		iterator += (datasetLen - 6); // skip mag and gyro data
+		accX = (int16_t) ((fifoData[iterator+1] << 8) | fifoData[iterator]); iterator += 2;
+		accY = (int16_t) ((fifoData[iterator+1] << 8) | fifoData[iterator]); iterator += 2;
+		accZ = (int16_t) ((fifoData[iterator+1] << 8) | fifoData[iterator]); iterator += 2;
+		accXConv = accRawToG(accX, accelRange); // in G
+		accYConv = accRawToG(accY, accelRange); // in G
+		accZConv = accRawToG(accZ, accelRange); // in G
+		odba = odba + abs(accXConv - accXMean) + abs(accYConv - accYMean) + abs(accZConv - accZMean);
+	}
+
+	if(debug) { printf("calculateFifoODBA: odba: %.5f (%d samples)\n", odba, sampleCnt); }
+	odba = odba / sampleCnt; // IMPORTANT: look at the ODBA average!
+	odba = odba * 1000.0; // convert to mg
+	odbaInt = (uint32_t) odba;
+	return odbaInt;
+}
+
+uint32_t IMU_BMX160::calculateZeroCrossingsZ(uint8_t *fifoData, uint16_t fifoLen, bool withMag, bool withGyro, uint8_t accelRange, float minRangeG, bool debug) {
+	uint16_t iterator = 0;
+	int16_t accZ = 0;
+	float accZConv = 0.0;
+	float accZMean = 0.0;
+	float amplitude = 0.0; // UNTESTED
+	float amplitudeSum = 0.0; // UNTESTED
+	uint16_t datasetLen = 0;
+	uint32_t sampleCnt = 0;
+	uint32_t zeroCrossings = 0;
+	int8_t crossingState = 0; // 0 = first time
+	if((!withMag) && (!withGyro)) { datasetLen = 6; }
+	else if((withMag) && (!withGyro)) { datasetLen = 14; }
+	else if((withMag) && (withGyro)) { datasetLen = 20; }
+	if(minRangeG < 0.0) { return 0; }
+
+	// step 1: calculate average of Z
+	while(true) {
+		if(iterator + datasetLen > fifoLen) { break; }
+		iterator += (datasetLen - 6); // skip mag and gyro data
+		iterator += 2; // ignore X
+		iterator += 2; // ignore Y
+		accZ = (int16_t) ((fifoData[iterator+1] << 8) | fifoData[iterator]); iterator += 2;
+		accZMean += accRawToG(accZ, accelRange); // in G
+		sampleCnt++;
+	}
+	if(sampleCnt > 0) {
+		accZMean = accZMean / sampleCnt;
+	}
+	else { return 0; } // should not happen
+	if(debug) { printf("calculateZeroCrossingsZ: meanZ: %.5f\n", accZMean); }
+
+	// step 2: calculate zero crossings
+	iterator = 0;
+	while(true) {
+		if(iterator + datasetLen > fifoLen) { break; }
+		iterator += (datasetLen - 6); // skip mag and gyro data
+		iterator += 2; // ignore X
+		iterator += 2; // ignore Y
+		accZ = (int16_t) ((fifoData[iterator+1] << 8) | fifoData[iterator]); iterator += 2;
+		accZConv = accRawToG(accZ, accelRange); // in G
+		accZConv = accZConv - accZMean; // substract earth gravitation (static acceleration)
+		if(debug) {
+			if(accZConv < 0.0f) {printf(" -> %.4f (state: %d -> ", accZConv, crossingState); }
+			else {printf(" -> +%.4f (state: %d -> ", accZConv, crossingState); }
+		}
+		if(accZConv > minRangeG) {
+			if(crossingState == 0) { // first start, higher than minRange
+				crossingState = 1;
+				amplitude = accZConv; // first value for current amplitude in wave
+			}
+			else if(crossingState == -1) { // changed from negative to positive
+				zeroCrossings++;
+				crossingState = 1;
+				if(amplitude < 0.0f) { amplitude = -amplitude; } // look only at absolute values
+				amplitudeSum += amplitude; // add current amplitude to sum
+				amplitude = accZConv; // new amplitude = current value
+			}
+			else if(crossingState == 1) { // was above positive threshold before
+				if(accZConv > amplitude) { amplitude = accZConv; } // check if current value is highest value in wave
+			}
+		}
+		// nothing happens if accZConv is within +/- minRangeG
+		if(accZConv < (-minRangeG)) {
+			if(crossingState == 0) { // first start, lower than minRange
+				crossingState = -1;
+				amplitude = accZConv; // first value for current amplitude in wave
+			}
+			else if(crossingState == -1) { // was below negative threshold before
+				if(accZConv < amplitude) { amplitude = accZConv; } // check if current value is smallest value in wave
+			}
+			else if(crossingState == 1) { // changed from positive to negative
+				zeroCrossings++;
+				crossingState = -1;
+				if(amplitude < 0.0f) { amplitude = -amplitude; } // look only at absolute values
+				amplitudeSum += amplitude; // add current amplitude to sum
+				amplitude = accZConv; // new amplitude = current value
+			}
+		}
+		if(debug) { printf("%d) -> %d (AMP: %.4f)\n", crossingState, zeroCrossings, amplitude); }
+	}
+	float amplitudeAvg = 0;
+	if(zeroCrossings > 0) { amplitudeAvg = amplitudeSum / zeroCrossings; }
+	if(debug) { printf("Amplitude: Sum: %.4f, Avg: %.4f, Count: %d\n", amplitudeSum, amplitudeAvg, zeroCrossings); }
+	return zeroCrossings;
+}
+
+bool IMU_BMX160::magCompensateFifoData(uint8_t *fifoData, uint16_t fifoLen, bmx160_fifo_dataset_len_t datasetLen, bmm150_trim_registers *trimDataIn, int16_t magXOffsetX16, int16_t magYOffsetX16, int16_t magZOffsetX16) {
     uint16_t iterator = 0;
     int16_t magX, magY, magZ;
     uint16_t hall;
@@ -1060,9 +1284,14 @@ bool IMU_BMX160::magCompensateFifoData(uint8_t *fifoData, uint16_t fifoLen, bmx1
         hall = (uint16_t)(((uint16_t)fifoData[iterator+1]<< 6) | fifoData[iterator]);
         iterator += 2;
 
-        magX = magCompensateXandConvertToMicroTesla(magX, hall, trimDataIn);
-        magY = magCompensateYandConvertToMicroTesla(magY, hall, trimDataIn);
-        magZ = magCompensateZandConvertToMicroTesla(magZ, hall, trimDataIn);
+        magX = magCompensateXandConvertToMicroTeslaX16(magX, hall, trimDataIn); // NEW: converts into uT x 16
+        magY = magCompensateYandConvertToMicroTeslaX16(magY, hall, trimDataIn); // NEW: converts into uT x 16
+        magZ = magCompensateZandConvertToMicroTeslaX16(magZ, hall, trimDataIn); // NEW: converts into uT x 16
+
+		// substract hard and soft iron offsets
+		magX -= magXOffsetX16;
+		magY -= magYOffsetX16;
+		magZ -= magZOffsetX16;
 
         iterator -= 8; // go back to beginning for updating fifo
         fifoData[iterator] = magX;
@@ -1186,7 +1415,7 @@ bool IMU_BMX160::magCompensateReadTrimData(bmm150_trim_registers *trimData) {
     return true;
 }
 
-int16_t IMU_BMX160::magCompensateXandConvertToMicroTesla(int16_t mag_data_x, uint16_t data_rhall, bmm150_trim_registers *trimData) {
+int16_t IMU_BMX160::magCompensateXandConvertToMicroTeslaX16(int16_t mag_data_x, uint16_t data_rhall, bmm150_trim_registers *trimData) {
     int16_t retval;
     uint16_t process_comp_x0 = 0;
     int32_t process_comp_x1;
@@ -1226,7 +1455,8 @@ int16_t IMU_BMX160::magCompensateXandConvertToMicroTesla(int16_t mag_data_x, uin
             process_comp_x9 = ((process_comp_x7 * process_comp_x8) / 4096);
             process_comp_x10 = ((int32_t)mag_data_x) * process_comp_x9;
             retval = ((int16_t)(process_comp_x10 / 8192));
-            retval = (retval + (((int16_t)trimData->dig_x1) * 8)) / 16;
+            //retval = (retval + (((int16_t)trimData->dig_x1) * 8)) / 16; // ORIGINAL from Bosch: outputting uT
+			retval = (retval + (((int16_t)trimData->dig_x1) * 8)); // NEW: don't divide by 16
         }
         else {
             retval = BMM150_OVERFLOW_OUTPUT;
@@ -1239,7 +1469,7 @@ int16_t IMU_BMX160::magCompensateXandConvertToMicroTesla(int16_t mag_data_x, uin
     return retval;
 }
 
-int16_t IMU_BMX160::magCompensateYandConvertToMicroTesla(int16_t mag_data_y, uint16_t data_rhall, bmm150_trim_registers *trimData) {
+int16_t IMU_BMX160::magCompensateYandConvertToMicroTeslaX16(int16_t mag_data_y, uint16_t data_rhall, bmm150_trim_registers *trimData) {
     int16_t retval;
     uint16_t process_comp_y0 = 0;
     int32_t process_comp_y1;
@@ -1277,7 +1507,8 @@ int16_t IMU_BMX160::magCompensateYandConvertToMicroTesla(int16_t mag_data_y, uin
             process_comp_y8 = (((process_comp_y6 + ((int32_t)0x100000)) * process_comp_y7) / 4096);
             process_comp_y9 = (((int32_t)mag_data_y) * process_comp_y8);
             retval = (int16_t)(process_comp_y9 / 8192);
-            retval = (retval + (((int16_t)trimData->dig_y1) * 8)) / 16;
+            //retval = (retval + (((int16_t)trimData->dig_y1) * 8)) / 16; // ORIGINAL from Bosch: outputting uT
+			retval = (retval + (((int16_t)trimData->dig_y1) * 8)); // NEW: don't divide by 16
         }
         else {
             retval = BMM150_OVERFLOW_OUTPUT;
@@ -1290,7 +1521,7 @@ int16_t IMU_BMX160::magCompensateYandConvertToMicroTesla(int16_t mag_data_y, uin
     return retval;
 }
 
-int16_t IMU_BMX160::magCompensateZandConvertToMicroTesla(int16_t mag_data_z, uint16_t data_rhall, bmm150_trim_registers *trimData) {
+int16_t IMU_BMX160::magCompensateZandConvertToMicroTeslaX16(int16_t mag_data_z, uint16_t data_rhall, bmm150_trim_registers *trimData) {
     int32_t retval;
     int16_t process_comp_z0;
     int32_t process_comp_z1;
@@ -1315,7 +1546,8 @@ int16_t IMU_BMX160::magCompensateZandConvertToMicroTesla(int16_t mag_data_z, uin
                 retval = BMM150_NEGATIVE_SATURATION_Z;
             }
             /* Conversion of LSB to micro-tesla */
-            retval = retval / 16;
+            //retval = retval / 16; // ORIGINAL from Bosch: outputting uT
+			// NEW: don't divide by 16
         }
         else {
             retval = BMM150_OVERFLOW_OUTPUT;
@@ -1328,17 +1560,20 @@ int16_t IMU_BMX160::magCompensateZandConvertToMicroTesla(int16_t mag_data_z, uin
     return (int16_t)retval;
 }
 
-int16_t IMU_BMX160::magXConvertToMicroTesla(int16_t mag_data_x, bmm150_trim_registers *trimData) {
+int16_t IMU_BMX160::magXConvertToMicroTeslaX16(int16_t mag_data_x, bmm150_trim_registers *trimData) {
+	// NO TEMPERATURE COMPENSATION!!!
 	// according to Bosch: pass this argument as default r_hall value to deactivate temperature compensation
-	return magCompensateXandConvertToMicroTesla(mag_data_x, trimData->dig_xyz1, trimData);
+	return magCompensateXandConvertToMicroTeslaX16(mag_data_x, trimData->dig_xyz1, trimData);
 }
 
-int16_t IMU_BMX160::magYConvertToMicroTesla(int16_t mag_data_y, bmm150_trim_registers *trimData) {
+int16_t IMU_BMX160::magYConvertToMicroTeslaX16(int16_t mag_data_y, bmm150_trim_registers *trimData) {
+	// NO TEMPERATURE COMPENSATION!!!
 	// according to Bosch: pass this argument as default r_hall value to deactivate temperature compensation
-	return magCompensateYandConvertToMicroTesla(mag_data_y, trimData->dig_xyz1, trimData);
+	return magCompensateYandConvertToMicroTeslaX16(mag_data_y, trimData->dig_xyz1, trimData);
 }
 
-int16_t IMU_BMX160::magZConvertToMicroTesla(int16_t mag_data_z, bmm150_trim_registers *trimData) {
+int16_t IMU_BMX160::magZConvertToMicroTeslaX16(int16_t mag_data_z, bmm150_trim_registers *trimData) {
+	// NO TEMPERATURE COMPENSATION!!!
 	// according to Bosch: pass this argument as default r_hall value to deactivate temperature compensation
-	return magCompensateZandConvertToMicroTesla(mag_data_z, trimData->dig_xyz1, trimData);
+	return magCompensateZandConvertToMicroTeslaX16(mag_data_z, trimData->dig_xyz1, trimData);
 }	

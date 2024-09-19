@@ -11,11 +11,13 @@ import java.util.Formatter;
 import java.util.Locale;
 
 import static java.lang.Math.toIntExact;
+import static net.timm.wildfidecoder.decoder.LogEntryManager.gpsLatLngToText;
 
 public class LogEntry1HzGPSAccMagGyroREV6 extends LogEntry {
     public long milliseconds, lastErrorId, fifoLen;
     double temperature, humidity, pressure, temperatureBmx;
     double lat, lon, hdop;
+    String name;
 
     public ArrayList<IMUEntry> imuEntries = new ArrayList<>();
 
@@ -24,27 +26,28 @@ public class LogEntry1HzGPSAccMagGyroREV6 extends LogEntry {
     }
     public int minLength = INDEX(32);
 
-    public void decode(String dataset, boolean decodeOnlyHeaderIn, boolean debug, IMUSettings imuSettings) {
-        decodeOnlyHeader = decodeOnlyHeaderIn;
-
+    public void decode(String name, String dataset, boolean debug, IMUSettings imuSettings, int imuFrequency) {
         if(dataset.length() < minLength) {
             if (debug) Log.d("decoder-plausibility", "length not plausible " + dataset.length());
             plausibilityCheckOkay = false;
             return;
         }
 
+        this.name = name;
+        this.imuFrequency = imuFrequency;
+
         utcTimestamp = Long.parseLong(dataset.substring(INDEX(3), INDEX(7)), 16);
         milliseconds = 10 * Long.parseLong(dataset.substring(INDEX(7), INDEX(8)), 16);
         lastErrorId = Long.parseLong(dataset.substring(INDEX(8), INDEX(9)), 16);
 
-        lat = (Long.parseLong(dataset.substring(INDEX(9), INDEX(13)), 16)) / 1000000.;
-        lon = (Long.parseLong(dataset.substring(INDEX(13), INDEX(17)), 16)) / 1000000.;
+        lat = ((int) Long.parseLong(dataset.substring(INDEX(9), INDEX(13)), 16)) / 1000000.;
+        lon = ((int) Long.parseLong(dataset.substring(INDEX(13), INDEX(17)), 16)) / 1000000.;
         hdop = (Long.parseLong(dataset.substring(INDEX(17), INDEX(18)), 16)) / 10.;
 
-        temperature = Long.parseLong(dataset.substring(INDEX(18), INDEX(20)), 16) / 100.;
+        temperature = ((short) Integer.parseInt(dataset.substring(INDEX(18), INDEX(20)), 16)) / 100.;
         humidity = Long.parseLong(dataset.substring(INDEX(20), INDEX(24)), 16) / 1000.;
         pressure = Long.parseLong(dataset.substring(INDEX(24), INDEX(28)), 16) / 100.;
-        temperatureBmx = Long.parseLong(dataset.substring(INDEX(28), INDEX(30)), 16) / 100.;
+        temperatureBmx = ((short) Integer.parseInt(dataset.substring(INDEX(28), INDEX(30)), 16)) / 100.;
 
         fifoLen = Long.parseLong(dataset.substring(INDEX(30), INDEX(32)), 16);
 
@@ -61,13 +64,14 @@ public class LogEntry1HzGPSAccMagGyroREV6 extends LogEntry {
         }
 
         if(plausibilityCheckOkay) {
-            IMUDecoder.createIMUData(true, true, true, fifoDataExtracted, imuEntries, imuSettings.accConversionFactor, imuSettings.gyroConversionFactor);
+            IMUDecoder.createIMUData(true, true, true, fifoDataExtracted, imuEntries, imuSettings.accConversionFactor, imuSettings.gyroConversionFactor, imuSettings.magConversionFactor);
         }
         entryLengthInBytes = toIntExact((minLength / 2) + fifoLen);
     }
 
     public String headlineHeader() {
         return "prefixDataType," +
+				"tagId," +
                 "utcTimestamp," +
                 "utcDate," +
                 "milliseconds," +
@@ -84,13 +88,14 @@ public class LogEntry1HzGPSAccMagGyroREV6 extends LogEntry {
 
     public String serializeHeader() {
         return prefix + ","
+				+ name + ","
                 + utcTimestamp + ","
                 + LogEntryManager.utcTimestampToStringWithoutWeekday(utcTimestamp) + ","
                 + milliseconds + ","
                 + lastErrorId + ","
-                + (new Formatter(Locale.US).format("%.7f", lat)) + ","
-                + (new Formatter(Locale.US).format("%.7f", lon)) + ","
-                + (new Formatter(Locale.US).format("%.1f", hdop)) + ","
+                + LogEntryManager.gpsLatLngToText(lat) + ","
+                + LogEntryManager.gpsLatLngToText(lon) + ","
+                + LogEntryManager.gpsHdopToText(hdop) + ","
                 + (new Formatter(Locale.US).format("%.3f", temperature)) + ","
                 + (new Formatter(Locale.US).format("%.3f", humidity)) + ","
                 + (new Formatter(Locale.US).format("%.3f", pressure)) + ","
@@ -102,20 +107,34 @@ public class LogEntry1HzGPSAccMagGyroREV6 extends LogEntry {
         return imuEntries.size();
     }
 
-    public String headlineHeaderAndVarData() {
-        return headlineHeader() + "," + IMUEntry.serializeHeadline(true, true, true);
-    }
+	public String headlineHeaderAndVarData(boolean useBurstForm) {
+		return headlineHeader() + "," + IMUEntry.serializeHeadline(true, true, true, useBurstForm);
+	}
 
-    public String serializeHeaderAndVarData() {
-        String returnVal = "";
-        int i = 0;
-        for (IMUEntry a : imuEntries) {
-            if(i++ == imuEntries.size() - 1) returnVal += serializeHeader() + "," + a.serialize() + "\n";
-            else returnVal += serializeHeaderEmpty() + "," + a.serialize() + "\n";
-        }
-        if (returnVal.length() > 0) returnVal = returnVal.substring(0, returnVal.length() - 1);
-        return returnVal;
-    }
+	public String serializeHeaderAndVarData (boolean useBurstForm) {
+		String returnVal = "";
+		if (useBurstForm) {
+			returnVal = serializeHeader() + ",";
+			for (int i = 0; i < imuEntries.size(); i++)
+				returnVal += imuEntries.get(i).serializeConsecutiveNumber() + (i == imuEntries.size() - 1 ? "," : " ");
+			for (int i = 0; i < imuEntries.size(); i++)
+				returnVal += imuEntries.get(i).serializeAccelerometerData() + (i == imuEntries.size() - 1 ? "," : " ");
+			for (int i = 0; i < imuEntries.size(); i++)
+				returnVal += imuEntries.get(i).serializeMagnetometerData() + (i == imuEntries.size() - 1 ? "," : " ");
+			for (int i = 0; i < imuEntries.size(); i++)
+				returnVal += imuEntries.get(i).serializeHallSensorData() + (i == imuEntries.size() - 1 ? "," : " ");
+			for (int i = 0; i < imuEntries.size(); i++)
+				returnVal += imuEntries.get(i).serializeGyroscopeData() + (i == imuEntries.size() - 1 ? "," : " ");
+			if(imuEntries.size() > 0) returnVal += imuEntries.get(0).serializeConversionFactor() + ",";
+			else returnVal += ",";
+            returnVal += imuFrequency + ",XYZ,";
+		} else {
+			for (int i = 0; i < imuEntries.size(); i++)
+				returnVal += (i == imuEntries.size() - 1 ? serializeHeader() : serializeHeaderEmpty()) + "," + imuEntries.get(i).serialize() + "\n";
+		}
+		if (returnVal.length() > 0) returnVal = returnVal.substring(0, returnVal.length() - 1);
+		return returnVal;
+	}
 
     public LogEntry copyMe(String dataMessageCustomPrefixIn) {
         LogEntry1HzGPSAccMagGyroREV6 e = new LogEntry1HzGPSAccMagGyroREV6();

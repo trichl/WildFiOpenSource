@@ -3,8 +3,6 @@
 
 // TODO: read temperature
 // TODO: tryout disabling ADC0 and see if smaller current during active
-// TODO: Interrupts -> both RTC and WAKEUP to EXT1? (because both need pull-up)
-
 // TEST 29.06.2020: ACTIVATED DYNAMIC FREQUENCY SCALING AND TICKLESS IDLE (FreeRTOS)! (don't know side effects) -> DEACTIVATED, higher current consumption with BLE
 
 // ESP-IDF
@@ -36,6 +34,7 @@
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "nvs_flash.h"
+#include "esp_wpa2.h" // for WPA2 Enterprise library used for eduroam connection
 
 // ESP-IDF for HTTP
 #include "esp_http_client.h"
@@ -81,9 +80,6 @@
 
 // Random generator
 #include "bootloader_random.h"
-
-// WiFi credentials
-#include "WifiCredentials.h"
 
 class WildFiTagREV6; // forward declaration for post_task_stream_flash_parameters_t
 
@@ -259,8 +255,10 @@ typedef struct {
 typedef struct {
 	const char *url;
 	const char *contentType;
-	const char *additionalHeaderKey;
-	const char *additionalHeaderValue;
+	const char *additionalHeaderKey1;
+	const char *additionalHeaderValue1;
+	const char *additionalHeaderKey2;
+	const char *additionalHeaderValue2;
     const char *prefix;
 	bool constructCustomPrefix;
     const char *postfix;
@@ -314,14 +312,14 @@ struct {
 	//bool isESP[BLE_BEACON_MAX_DEVICES] = { 0 };
 } bleRXBuffer;
 
-void bleMain(void *param); 												// main task executed in separate thread
+//void bleMain(void *param); 												// main task executed in separate thread
 
 /** Wake stub */
 #define LIN_COEFF_A_SCALE_ESP               65536						// for V_BATT calculation in wake stub
 #define LIN_COEFF_A_ROUND_ESP               (LIN_COEFF_A_SCALE_ESP/2)	// for V_BATT calculation in wake stub
 #define DEEP_SLEEP_TIME_OVERHEAD_US 		(250 + 100 * 240 / CONFIG_ESP32_DEFAULT_CPU_FREQ_MHZ) // using the internal RTC RC (150KHz) oscillator.
 #define STRANGE_VBATT_OFFSET				32							// seems to be constant offset
-#define V_BATT_MINIMUM_FOR_BOOT				3500						// do not boot if V_BATT below that voltage/1000!
+#define V_BATT_MINIMUM_FOR_BOOT				3300						// do not boot if V_BATT below that voltage/1000!
 #define USE_EXT0_IF_WAKE_UP_REJECTED		0							// wake stub decides not to wake up system -> will wake up again on EXT0 interrupt
 #define USE_EXT1_IF_WAKE_UP_REJECTED		1							// wake stub decides not to wake up system -> will wake up again on EXT1 interrupt
 RTC_IRAM_ATTR void deepsleep_for_us(uint64_t duration_us);
@@ -353,6 +351,10 @@ void RTC_IRAM_ATTR esp_wake_deep_sleep(void); 							// 10ms without serial outp
 #define UART2_EVENT_QUEUE_SIZE 				100
 
 /** Magnetometer calibration */
+#define NVS_MAG_CALIB_OFFSET_X                          "magcalx"                       // result from offset calibration mode
+#define NVS_MAG_CALIB_OFFSET_Y                          "magcaly"                       // result from offset calibration mode
+#define NVS_MAG_CALIB_OFFSET_Z                          "magcalz"                       // result from offset calibration mode
+
 struct mag_calibration_t {
 	int16_t xMin;
 	int16_t xMax;
@@ -387,6 +389,7 @@ class WildFiTagREV6 {
 
 		/** Wake-up from deep sleep */
 		void enableInternalTimerInterruptInDeepSleep(uint32_t seconds); // measured: 3.92h in deep sleep = 123s drift (too short), according to internet: drift should be around 1 minute per day
+		void enableShortInternalTimerInterruptInDeepSleep(uint32_t milliseconds);
 		void ultraShortDeepSleep();					// basically restarting system
 		void enableRTCInterruptInDeepSleep();		// using EXT0 (because pull-up supported), call before calling deepSleep()	
 		void enableWakeUpPinInDeepSleep();			// using EXT1, only ALL pins LOW or one pin HIGH, call before calling deepSleep()
@@ -397,11 +400,11 @@ class WildFiTagREV6 {
 
 		/** Wake-stub */
 		void customWakeStubFunction(bool (*functionPointer)());		// SEEMS TO RUN @40MHz CPU SPEED, call like device.customWakeStubFunction(wakeStub), needs to be RTC_DATA_ATTR
-		void disableWakeStubNoBootIfVoltageLow();
+		void enableWakeStubNoBootIfVoltageLow();
 		void setWakeStubRejectionInterruptSrc(uint8_t interruptSrc);	// use EXT0 (USE_EXT0_IF_WAKE_UP_REJECTED) or EXT1 (USE_EXT1_IF_WAKE_UP_REJECTED) to wake up if wake stub rejected wake up
 		
 		/** ADC battery voltage */
-		uint16_t readSupplyVoltage();				// OVERRIDE, in V*1000 (2700 = 2.7V)
+		uint16_t readSupplyVoltage(bool updateWakeStubVoltage); // OVERRIDE, in V*1000 (2700 = 2.7V)
 		uint32_t readSupplyVoltageFromWakeStub();	// Test result with real lipo (compared with multimeter): SHOULD: 4.11V, IS: 4.182V (TAG1) / 4.138V (TAG2) -> long time experiment: 4.14V measured with multimeter, measurement function: 4.217V 
 		int32_t readHallSensor(uint16_t iterations);// might return shitty values due to PIN_WAKEUP = GPIO36: reading from it uses channels 0 and 3 of ADC1 (GPIO 36 and 39) -> "do not connect anything else to these pins and do not change their configuration, otherwise it may affect the measurement of low value signal from the sensor"
 		uint32_t readSupplyVoltageFromADC();		// only for internal use, returns real pin voltage
@@ -422,17 +425,23 @@ class WildFiTagREV6 {
 		uint32_t nvsGetBlobSize(const char *key);
 		uint32_t nvsReadUINT32(const char *key);				// 1ms
 		uint16_t nvsReadUINT16(const char *key);				// 1ms
+		int16_t nvsReadINT16(const char *key);				// 1ms
 		uint8_t nvsReadUINT8(const char *key);					// 1ms
+		uint32_t nvsReadUINT32(const char *key, bool *neverWritten); // 1ms
+		uint16_t nvsReadUINT16(const char *key, bool *neverWritten); // 1ms
+		int16_t nvsReadINT16(const char *key, bool *neverWritten); // 1ms
+		uint8_t nvsReadUINT8(const char *key, bool *neverWritten); // 1ms
 		bool nvsWriteUINT32(const char *key, uint32_t val); 	// 7ms
 		bool nvsWriteUINT16(const char *key, uint16_t val); 	// 7ms
 		bool nvsWriteUINT8(const char *key, uint8_t val); 		// 7ms
 		bool nvsWriteUINT32x2(const char *key1, uint32_t val1, const char *key2, uint32_t val2);
 		bool nvsWriteUINT32andUINT16(const char *key1, uint32_t val1, const char *key2, uint16_t val2);
+		bool nvsWriteINT16(const char *key, int16_t val);
 		uint32_t nvsReadThenPlusOneUINT32(const char *key);
 
 		/** First (default) NVS partition */
 		bool initNVS();											// WARNING: takes 157ms (@10MHz) and 16ms-87ms (@80MHz), used for WiFi and BLE, using partition "nvs"
-		bool resetNVS();									// full erase
+		bool resetNVS();										// full erase
 		uint32_t defaultNvsReadUINT32(const char *key, bool *neverWritten);
 		uint16_t defaultNvsReadUINT16(const char *key, bool *neverWritten);
 		uint8_t defaultNvsReadUINT8(const char *key, bool *neverWritten);
@@ -453,12 +462,20 @@ class WildFiTagREV6 {
 		bool flashPowerOff(bool withDelay);
 		void keepSensorPowerOnInDeepSleep();		// +1uA in deep sleep (imu and baro on), ACC can fill FiFo while ESP32 sleeps
 
+		/** GPIO A */
+		bool gpioAGetLevel();
+		void enableGpioAInterruptInLightSleep(bool level);
+		void disableGpioAInterruptInLightSleep();
+		
 		/** GPIO B */
 		void gpioBOn();
 		void gpioBOff();
 
 		/** UART 1 (USB) */
-		bool serialMenue(bool blinkRed, const char *nvsOwnIdString, const char *nvsActivationString, void (*gpsFunction)(void));
+		void flashStressTest();
+		bool serialMenueGetSelfTestDone(const char *nvsSelfTestDone);
+		void serialMenueSetSelfTestDone(const char *nvsSelfTestDone);
+		bool serialMenue(bool blinkRed, const char *nvsSelfTestDone, const char *nvsOwnIdString, const char *nvsActivationString, void (*gpsFunction)(void), void (*gpsFunction2)(void));
 		bool waitOnChar(char c, uint16_t timeoutSeconds);
 		char waitOnAnyChar(uint16_t timeoutSeconds);
 		uint32_t waitOnNumberInput(uint16_t timeoutSeconds);
@@ -504,10 +521,13 @@ class WildFiTagREV6 {
 		bool scanForWiFisOn1and6and11(const char** ssids, const uint8_t wifiListSize, uint8_t *wifiArrayId, uint8_t *foundOnChannel, int8_t maxTxPower, uint32_t scanTimePerChannel, uint16_t timeoutScanMs);
 		bool scanForWiFisOn1and6and11WithPriority(bool debug, const char** ssids, const uint8_t wifiListSize, uint8_t *wifiArrayId, uint8_t *foundOnChannel, int8_t maxTxPower, uint32_t scanTimePerChannel, uint16_t timeoutScanMs);
 		bool scanForWiFisOn1and6and11and13WithPriority(bool debug, const char** ssids, const uint8_t wifiListSize, uint8_t *wifiArrayId, uint8_t *foundOnChannel, int8_t maxTxPower, uint32_t scanTimePerChannel, uint16_t timeoutScanMs);
+		bool scanForWiFisOnAllChannels(bool debug, const char** ssids, const uint8_t wifiListSize, uint8_t *wifiArrayId, uint8_t *foundOnChannel, int8_t maxTxPower, uint32_t scanTimePerChannel, uint16_t timeoutScanMs);
+		bool sniffWiFisOn1and6and11(uint8_t *scanData, uint32_t maxScanDataLength, uint32_t *actualScanDataLength, int8_t maxTxPower, uint32_t scanTimePerChannel);
 		bool wiFiScanCompleted(); // for polling if scanForWiFis shall not block, default (all 14 channels): 2051ms (120ms scanTimePerChannel * 14 channels + some additional time), 1611ms if scanTimePerChannel = 80ms, 951ms if scanTimePerChannel = 20ms -> ONLY ONE CHANNEL SCAN = 311ms (!)
 		bool wiFiScanIncludes(const char* ssid, uint8_t *foundChannel);
 		bool wiFiScanIncludesArray(const char** ssids, const uint8_t wifiListSize, uint8_t *wifiArrayId, uint8_t *foundChannel);
 		//bool wiFiScanIncludesArray(const char** ssid);
+		bool setupEDUROAM(const char* anonymousIdentity, const char* identity, const char* password, const char* caCert);
 		bool connectToWiFiAfterScan(const char* ssid, const char* password, uint8_t channel); // using maxTxPower from scanForWiFis AND ALSO scanTimePerChannel (last setting)!
 		uint8_t printWiFiScanResults();
 		bool connectToWiFiDirectly(const char* ssid, const char* password, int8_t maxTxPower, uint8_t channel = WIFI_ALL_14_CHANNELS); // 119ms, needs initWiFi to be called before
@@ -529,7 +549,7 @@ class WildFiTagREV6 {
 		bool getNTPTimestampUTC(bool storeInRTC, uint32_t &timestampUTC, uint16_t &milliseconds, const uint32_t timeoutMs, const char* serverAddr); // normally serverAddr = "pool.ntp.org"
 
 		/** BLE (NIMBLE) */
-		bool startBLE(ble_mode_t mode, uint8_t *data, uint8_t len); // 102mA average if advertising and scanning, 32mA only advertising
+		/*bool startBLE(ble_mode_t mode, uint8_t *data, uint8_t len); // 102mA average if advertising and scanning, 32mA only advertising
 		void stopBLE(); // 500ms between start and stop = already received some beacons, <= 300ms = too short, 1000ms seems nice, 1100ms for proximity detection seems good
 		static void printOwnBLEAddress();
 		uint16_t getBLEBiologgerFound();
@@ -539,13 +559,13 @@ class WildFiTagREV6 {
 		//uint64_t getBLEMacAddress(uint16_t index);
 		uint8_t getBLEPayloadLen(uint16_t index);
 		uint8_t getBLEPayload(uint16_t deviceIndex, uint8_t byteIndex);
-		uint16_t getBLEBiologgerId(uint16_t index);
+		uint16_t getBLEBiologgerId(uint16_t index);*/
 
 		/** Helper functions */
 		uint32_t measureTime(const char* text, bool dontPrint = false);
 
 		/** Magnetometer calibration routine */
-		bool magnetometerCalibrationMode(uint16_t durationSeconds, mag_calibration_t *calibrationData, bmm150_trim_registers *trimDataIn); // before: get trimData and start imu
+		bool magnetometerCalibrationMode(uint16_t durationSeconds, mag_calibration_t *calibrationData, uint8_t magFrequency, uint8_t magAccuracy, bool blink); // before: get trimData and sensorPowerOn
 
 		/** WildFiTagREV6 integrated modules */
 		RTC_RV8803C7 rtc = RTC_RV8803C7();
@@ -568,7 +588,7 @@ class WildFiTagREV6 {
 
 		QueueHandle_t uart2Queue;
 		
-		bool checkBLEOkay(uint16_t index);
+		//bool checkBLEOkay(uint16_t index);
 		bool wiFiSetCountryToUseChannel1to11();
 };
 

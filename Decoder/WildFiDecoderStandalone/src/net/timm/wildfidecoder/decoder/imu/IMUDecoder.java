@@ -53,7 +53,7 @@ public class IMUDecoder {
         return (lastTimestamp * 1000) - (long) fraction;
     }
 
-    public static int createIMUData(boolean hasAccData, boolean hasMagData, boolean hasGyroData, String fifo, ArrayList<IMUEntry> imuEntries, double accConversionFactorToG, double gyroConversionFactorToDPS) {
+    public static int createIMUData(boolean hasAccData, boolean hasMagData, boolean hasGyroData, String fifo, ArrayList<IMUEntry> imuEntries, double accConversionFactorToG, double gyroConversionFactorToDPS, double magConversionFactorTouT) {
         int len = fifo.length();
         int countIMUEntries = 0;
         int DATASET_LENGTH;
@@ -78,16 +78,18 @@ public class IMUDecoder {
                 a.accXinG = x * accConversionFactorToG;
                 a.accYinG = y * accConversionFactorToG;
                 a.accZinG = z * accConversionFactorToG;
+								a.accConvFact = accConversionFactorToG;
             }
             else if(hasAccData && hasMagData && !hasGyroData) {
                 x = (short) Integer.parseInt(dataset.substring(2, 4)+dataset.substring(0, 2),16);
                 y = (short) Integer.parseInt(dataset.substring(6, 8)+dataset.substring(4, 6),16);
                 z = (short) Integer.parseInt(dataset.substring(10, 12)+dataset.substring(8, 10),16);
                 hall = (short) Integer.parseInt(dataset.substring(14, 16)+dataset.substring(12, 14),16);
-                a.magXinUT = x;
-                a.magYinUT = y;
-                a.magZinUT = z;
+                a.magXinUT = x / magConversionFactorTouT;
+                a.magYinUT = y / magConversionFactorTouT;
+                a.magZinUT = z / magConversionFactorTouT;
                 a.hall = hall;
+								a.magConvFact = magConversionFactorTouT;
 
                 x = (short) Integer.parseInt(dataset.substring(18, 20)+dataset.substring(16, 18),16);
                 y = (short) Integer.parseInt(dataset.substring(22, 24)+dataset.substring(20, 22),16);
@@ -95,6 +97,7 @@ public class IMUDecoder {
                 a.accXinG = x * accConversionFactorToG;
                 a.accYinG = y * accConversionFactorToG;
                 a.accZinG = z * accConversionFactorToG;
+								a.accConvFact = accConversionFactorToG;
             }
             else if(hasAccData && !hasMagData && hasGyroData) {
                 x = (short) Integer.parseInt(dataset.substring(2, 4)+dataset.substring(0, 2),16);
@@ -103,6 +106,7 @@ public class IMUDecoder {
                 a.gyroXinDPS = x * gyroConversionFactorToDPS;
                 a.gyroYinDPS = y * gyroConversionFactorToDPS;
                 a.gyroZinDPS = z * gyroConversionFactorToDPS;
+								a.gyroConvFact = gyroConversionFactorToDPS;
 
                 x = (short) Integer.parseInt(dataset.substring(14, 16)+dataset.substring(12, 14),16);
                 y = (short) Integer.parseInt(dataset.substring(18, 20)+dataset.substring(16, 18),16);
@@ -110,16 +114,18 @@ public class IMUDecoder {
                 a.accXinG = x * accConversionFactorToG;
                 a.accYinG = y * accConversionFactorToG;
                 a.accZinG = z * accConversionFactorToG;
+								a.accConvFact = accConversionFactorToG;
             }
             else if(hasAccData && hasMagData && hasGyroData) {
                 x = (short) Integer.parseInt(dataset.substring(2, 4)+dataset.substring(0, 2),16);
                 y = (short) Integer.parseInt(dataset.substring(6, 8)+dataset.substring(4, 6),16);
                 z = (short) Integer.parseInt(dataset.substring(10, 12)+dataset.substring(8, 10),16);
                 hall = (short) Integer.parseInt(dataset.substring(14, 16)+dataset.substring(12, 14),16);
-                a.magXinUT = x;
-                a.magYinUT = y;
-                a.magZinUT = z;
+                a.magXinUT = x / magConversionFactorTouT;
+                a.magYinUT = y / magConversionFactorTouT;
+                a.magZinUT = z / magConversionFactorTouT;
                 a.hall = hall;
+								a.magConvFact = magConversionFactorTouT;
 
                 x = (short) Integer.parseInt(dataset.substring(18, 20)+dataset.substring(16, 18),16);
                 y = (short) Integer.parseInt(dataset.substring(22, 24)+dataset.substring(20, 22),16);
@@ -127,6 +133,7 @@ public class IMUDecoder {
                 a.gyroXinDPS = x * gyroConversionFactorToDPS;
                 a.gyroYinDPS = y * gyroConversionFactorToDPS;
                 a.gyroZinDPS = z * gyroConversionFactorToDPS;
+								a.gyroConvFact = gyroConversionFactorToDPS;
 
                 x = (short) Integer.parseInt(dataset.substring(30, 32)+dataset.substring(28, 30),16);
                 y = (short) Integer.parseInt(dataset.substring(34, 36)+dataset.substring(32, 34),16);
@@ -134,6 +141,7 @@ public class IMUDecoder {
                 a.accXinG = x * accConversionFactorToG;
                 a.accYinG = y * accConversionFactorToG;
                 a.accZinG = z * accConversionFactorToG;
+								a.accConvFact = accConversionFactorToG;
             }
 
             /*

@@ -4,6 +4,49 @@ FLASH_MT29::FLASH_MT29() {
 	
 }
 
+uint16_t FLASH_MT29::readID() {
+	// 0 address bytes, 1 dummy, 2 byte data
+	// simulate dummy byte by using 1 adress bytes
+	uint16_t id = (uint16_t) spi.readMax4Byte(MT29_CMD_READ_ID, 1, 0, 1, 2);
+	return id;
+}
+
+bool FLASH_MT29::waitOnID() {
+    uint16_t flashID = 0;
+    const uint16_t MAX_CHECKS = 500; // normally after 34 checks when flashPowerOn without delay
+    uint16_t i = 0;
+    while(true) {
+        flashID = readID();
+        if(flashID == MT29_FLASH_ID) { break; }
+        if(i > MAX_CHECKS) { return false; }
+        i++;
+    }
+    return true;  
+}
+
+bool FLASH_MT29::reset() {
+	// WARNING: not working if flash just started without any delay (because SPI returns 0x00 as default if device is not yet responding)
+	const uint8_t WAIT_TIMEOUT = 250;
+	uint16_t loopCnt = 0;
+	uint32_t status = 0;
+	uint32_t result = spi.readMax4Byte(MT29_CMD_RESET, 1, 0, 0, 0);
+	if(result != 0) { return false; }
+
+	// polling status register (oip = 1 immediately after reset)
+	while(1) {
+		status = getFeatures(GET_FEATURES_STATUS);
+		if(status == 0) { // complete status register should be zero (including OIP)
+			break;
+		}
+		loopCnt++;
+		if(loopCnt > WAIT_TIMEOUT) { // timeout waiting
+			return false;
+		}
+		//Timing::delay(3);
+	}
+	return true;
+}
+
 uint32_t FLASH_MT29::fifoGetFreeSpace(uint16_t blocksErasedPointer, uint32_t currentPageAddress, uint16_t currentByteOffset, uint32_t fifoSizePages) {
 	// currentPageAddress = 0 .. 131071, currentByteOffset = 0 - 2047
 	// blocksErasedPointer = 0 .. 2047 -> if 0 then nothing erased yet -> if 2048 then ERROR
@@ -35,7 +78,24 @@ uint32_t FLASH_MT29::fifoGetFreeSpace(uint16_t blocksErasedPointer, uint32_t cur
 	return spaceLeft;
 }
 
-sequential_write_status_t FLASH_MT29::fifoPushSimple(uint16_t blocksErasedPointer, uint32_t &pageAddressStart, uint16_t &byteOffsetStart, uint8_t *data, uint32_t dataLen, bool readBack, bool debug, uint16_t maxIterations, uint32_t fifoSizePages) {
+sequential_write_status_t FLASH_MT29::fifoPushSimpleSkipBadBlocks(uint16_t blocksErasedPointer, uint32_t &pageAddressStart, uint16_t &byteOffsetStart, uint8_t *data, uint32_t dataLen, bool readBack, bool readBackCorrectFFFFFF, bool debug, uint16_t maxIterations, uint32_t fifoSizePages) {
+	// UNTESTED!!!
+	sequential_write_status_t firstResult, followingResult;
+	firstResult = fifoPushSimple(blocksErasedPointer, pageAddressStart, byteOffsetStart, data, dataLen, readBack, readBackCorrectFFFFFF, debug, maxIterations, fifoSizePages);
+	if((firstResult == MT29_SEQ_WRITE_STATUS_READ_BACK_ERROR) || (firstResult == MT29_SEQ_WRITE_STATUS_PARTIAL_WRITE_ERROR)) {
+		// try to write until writing works (maximum 256 times = 4 blocks when writing one full page)
+		for(uint16_t i=0; i<256; i++) {
+			Timing::delay(10); // 10 ms between writes and max 256 times = 2.56 seconds max. writing time
+			followingResult = fifoPushSimple(blocksErasedPointer, pageAddressStart, byteOffsetStart, data, dataLen, readBack, readBackCorrectFFFFFF, debug, maxIterations, fifoSizePages);
+			if((followingResult == MT29_SEQ_WRITE_STATUS_SUCCESS) || (followingResult == MT29_SEQ_WRITE_STATUS_MEMORY_FULL)) {
+				break; // worked!
+			}
+		}
+	}
+	return firstResult; // always return first result, even if could be corrected
+}
+
+sequential_write_status_t FLASH_MT29::fifoPushSimple(uint16_t blocksErasedPointer, uint32_t &pageAddressStart, uint16_t &byteOffsetStart, uint8_t *data, uint32_t dataLen, bool readBack, bool readBackCorrectFFFFFF, bool debug, uint16_t maxIterations, uint32_t fifoSizePages) {
 	uint32_t cpyPointer = 0; // current working pointer for data
 	uint16_t flashWriteIteration = 0; // for timeout in case of fatal software error (should not happen!)
 	uint16_t dmaBufferPointer = 0;
@@ -59,6 +119,17 @@ sequential_write_status_t FLASH_MT29::fifoPushSimple(uint16_t blocksErasedPointe
 			return MT29_SEQ_WRITE_STATUS_BUFFER_ERROR;
 		}
 	}
+
+	// NEW: wait until flash ID is readable (no error set, will be overwritten most probably)
+	if(!waitOnID()) {
+		if(debug) { printf("COULD NOT GET ID -> performing reset\n"); }
+		Timing::delay(10);
+		if(reset()) {
+			if(debug) { printf("SUCCESS\n"); }
+		}
+		Timing::delay(10);
+	}
+
 	while(true) { // one iteration = one write into flash memory with maximum 2048 bytes
 		spaceLeftInPage = MT29_CACHE_SIZE - byteOffsetStart; // we can squeeze in this amount of data into current page
 		dmaBufferPointer = 0; // reset dma pointer (fill with new data)
@@ -86,22 +157,45 @@ sequential_write_status_t FLASH_MT29::fifoPushSimple(uint16_t blocksErasedPointe
 
 		if(dmaBufferPointer > 0) { // was a BUG before -> when writing so that stuff fits exactly into last page -> partialWrite with length = dmaBufferPointer = 0 is called -> simulated with Java, works with this code
 			// write the data into flash
-			if(debug) {
-				if(!partialWriteMock(pageAddressStart, byteOffsetStart, dmaBuffer2048Bytes, dmaBufferPointer)) {
-					errorHappened = 1; // don't stop here, try to execute next write commands to have consistent pointers at the end
-				}
+			if(!partialWrite(pageAddressStart, byteOffsetStart, dmaBuffer2048Bytes, dmaBufferPointer)) { // will also return FALSE when trying to write zero bytes (issue before)
+				errorHappened = 1; // don't stop here, try to execute next write commands to have consistent pointers at the end
 			}
-			else {
-				// write
-				if(!partialWrite(pageAddressStart, byteOffsetStart, dmaBuffer2048Bytes, dmaBufferPointer)) { // will also return FALSE when trying to write zero bytes (issue before)
-					errorHappened = 1; // don't stop here, try to execute next write commands to have consistent pointers at the end
+			// read back
+			if(readBack) {
+				bool errorWithThisPage = false;
+				if(!readWithECC(pageAddressStart, byteOffsetStart, dmaReadBackBuffer2048Bytes, dmaBufferPointer)) { errorHappened = 2; errorWithThisPage = true; }
+				// compare
+				for(uint16_t i=0; i<dmaBufferPointer; i++) {
+					if(dmaReadBackBuffer2048Bytes[i] != dmaBuffer2048Bytes[i]) { errorHappened = 2; errorWithThisPage = true; break; }
 				}
-				// read back
-				if(readBack) {
-					if(!readWithECC(pageAddressStart, byteOffsetStart, dmaReadBackBuffer2048Bytes, dmaBufferPointer)) { errorHappened = 2; }
-					// compare
-					for(uint16_t i=0; i<dmaBufferPointer; i++) {
-						if(dmaReadBackBuffer2048Bytes[i] != dmaBuffer2048Bytes[i]) { errorHappened = 2; break; }
+				// NEW: correction algorithm
+				if(readBackCorrectFFFFFF) {
+					if(errorWithThisPage) {
+						if(debug) { printf("(*) ERROR WITH THIS PAGE -> try correcting\n"); }
+						bool aLotOfFFs = true;
+						for(uint16_t i=0; i<dmaBufferPointer; i++) {
+							if(dmaReadBackBuffer2048Bytes[i] != 0xFF) { aLotOfFFs = false; break; }
+						}
+						if(aLotOfFFs) {
+							bool retryFailed = false;
+							if(debug) { printf("(*) only FFs\n"); }
+							Timing::delay(10);
+							reset(); // perform a reset
+							Timing::delay(10);
+							// retry
+							partialWrite(pageAddressStart, byteOffsetStart, dmaBuffer2048Bytes, dmaBufferPointer);
+							if(!readWithECC(pageAddressStart, byteOffsetStart, dmaReadBackBuffer2048Bytes, dmaBufferPointer)) { retryFailed = true; }
+							for(uint16_t i=0; i<dmaBufferPointer; i++) {
+								if(dmaReadBackBuffer2048Bytes[i] != dmaBuffer2048Bytes[i]) { retryFailed = true; break; }
+							}
+							if(retryFailed) {
+								if(debug) { printf("(*) could not correct\n"); }
+							}
+							// keep errorHappened = 2, even if error was corrected
+						}
+						else {
+							if(debug) { printf("(*) NOT only FFs: %02X %02x %02X %02x\n", dmaReadBackBuffer2048Bytes[0], dmaReadBackBuffer2048Bytes[1], dmaReadBackBuffer2048Bytes[2], dmaReadBackBuffer2048Bytes[3]); }
+						}
 					}
 				}
 			}
@@ -572,12 +666,7 @@ bool FLASH_MT29::read(uint32_t pageAddress, uint16_t byteOffset, uint8_t *dataRe
 	if(!readFromCache(getPlane(pageAddress), byteOffset, dataResult, dataLen)) {
 		return false;
 	}
-	// check for ECC errors -> NOT WORKING WHEN PARTIAL PAGE PROGRAMMING, I THINK WOULD NEED TO WRITE 2048/4 = 512 BYTE AT ONCE TO KEEP ECC VALID?!
-	/*uint32_t eccStatus = (getFeatures(GET_FEATURES_STATUS) >> 4) & 0b111; // get ECC0, ECC1, ECC2
-	if((eccStatus == 0b010) || (eccStatus == 0b011) || (eccStatus == 0b101)) {
-		printf("ECC ERROR %d\n", eccStatus);
-		return false;
-	}*/
+	
 	return true;
 }
 
@@ -838,7 +927,7 @@ bool FLASH_MT29::printFlash(uint32_t addressStart, uint32_t numberPages, uint16_
         for(uint16_t i=0; i<lenPerPage; i++) {
             printf("%02X", dataTemp[i]);
         }
-        printf("\n");
+        if(!onlyData) { printf("\n"); }
         Timing::delay(10); // otherwise watchdog kicks in
     }
     heap_caps_free(dataTemp);

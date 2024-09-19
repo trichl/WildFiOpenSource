@@ -94,6 +94,17 @@
 #define BMX160_INT_STATUS_ANYMOT_WAS_Y           0x02
 #define BMX160_INT_STATUS_ANYMOT_WAS_Z           0x04
 
+/** SignificantMotion interrupt configuration */
+#define BMX160_INT_SIGMOT_SKIP_1_28S        	 0x00
+#define BMX160_INT_SIGMOT_SKIP_2_56S        	 0x01
+#define BMX160_INT_SIGMOT_SKIP_5_12S        	 0x02
+#define BMX160_INT_SIGMOT_SKIP_10_24S        	 0x03
+
+#define BMX160_INT_SIGMOT_PROOF_0_24S        	 0x00
+#define BMX160_INT_SIGMOT_PROOF_0_48S        	 0x01
+#define BMX160_INT_SIGMOT_PROOF_0_96S        	 0x02
+#define BMX160_INT_SIGMOT_PROOF_1_92S        	 0x03
+
 /** StepCounter configuration (from Internet) */
 #define BMX160_STEP_CONF_0_MIN_THRESH_0        0x00
 #define BMX160_STEP_CONF_0_MIN_THRESH_1        0x08
@@ -187,7 +198,7 @@ typedef struct {
 #define BMX160_MAG_ACCURACY_LOW_POWER         	 0x00 // noise: 1.0uT on xy, 1.5uT on z
 #define BMX160_MAG_ACCURACY_REGULAR            	 0x01 // noise: 0.6uT on xy, 0.6uT on z
 #define BMX160_MAG_ACCURACY_ENHANCED           	 0x02 // less noise
-#define BMX160_MAG_ACCURACY_HIGH               	 0x03 // even less noise
+#define BMX160_MAG_ACCURACY_HIGH               	 0x03 // even less noise, WARNING: MAXIMUM 20 HZ (according to Bosch community)
 
 #define BMX160_MAG_ACCURACY_LOW_POWER_XY		 0x01 // 3 repetitions
 #define BMX160_MAG_ACCURACY_LOW_POWER_Z			 0x02 // 3 repetitions
@@ -345,22 +356,21 @@ class IMU_BMX160 {
 		//bool startAccFOCAndStoreInNVM(); // WARNING: max 14 times! -> DEVICE NEEDS TO BE FLAT ON TABLE! Z-Axis = +1g
 		//bool accFOCAlreadyDoneAndStoredInNVM(); // check this always before writing!
 		
-
 		// Mag read trim registers (for temperature compensated AND not temperature compensated values)
 		bool magCompensateReadTrimData(bmm150_trim_registers *trimData); // do this BEFORE calling start, but AFTER some time after powering device up! only once, store trimData in RTC or memory
 		void magCompensatePrintTrimData(bmm150_trim_registers *trimData);
 
-		// Mag NOT temperature compensated data (according to Bosch: raw values cannot be converted straight to uT - these functions are needed)
-		int16_t magXConvertToMicroTesla(int16_t mag_data_x, bmm150_trim_registers *trimData);
-		int16_t magYConvertToMicroTesla(int16_t mag_data_y, bmm150_trim_registers *trimData);
-		int16_t magZConvertToMicroTesla(int16_t mag_data_z, bmm150_trim_registers *trimData);		
+		// Mag NOT temperature compensated data (according to Bosch: raw values cannot be converted straight to uT - these functions are needed), result needs to be divided by 16 for uT
+		int16_t magXConvertToMicroTeslaX16(int16_t mag_data_x, bmm150_trim_registers *trimData);
+		int16_t magYConvertToMicroTeslaX16(int16_t mag_data_y, bmm150_trim_registers *trimData);
+		int16_t magZConvertToMicroTeslaX16(int16_t mag_data_z, bmm150_trim_registers *trimData);		
 
-		// Mag temperature compensation (based on the measured RESISTANCE of the hall sensor = rhall)
-		int16_t magCompensateXandConvertToMicroTesla(int16_t mag_data_x, uint16_t data_rhall, bmm150_trim_registers *trimData);
-		int16_t magCompensateYandConvertToMicroTesla(int16_t mag_data_y, uint16_t data_rhall, bmm150_trim_registers *trimData);
-		int16_t magCompensateZandConvertToMicroTesla(int16_t mag_data_z, uint16_t data_rhall, bmm150_trim_registers *trimData);
+		// Mag temperature compensation (based on the measured RESISTANCE of the hall sensor = rhall), result needs to be divided by 16 for uT
+		int16_t magCompensateXandConvertToMicroTeslaX16(int16_t mag_data_x, uint16_t data_rhall, bmm150_trim_registers *trimData);
+		int16_t magCompensateYandConvertToMicroTeslaX16(int16_t mag_data_y, uint16_t data_rhall, bmm150_trim_registers *trimData);
+		int16_t magCompensateZandConvertToMicroTeslaX16(int16_t mag_data_z, uint16_t data_rhall, bmm150_trim_registers *trimData);
 
-		bool magCompensateFifoData(uint8_t *fifoData, uint16_t fifoLen, bmx160_fifo_dataset_len_t datasetLen, bmm150_trim_registers *trimDataIn);
+		bool magCompensateFifoData(uint8_t *fifoData, uint16_t fifoLen, bmx160_fifo_dataset_len_t datasetLen, bmm150_trim_registers *trimDataIn, int16_t magXOffsetX16, int16_t magYOffsetX16, int16_t magZOffsetX16);
 		bool printFifoData(uint8_t *fifoData, uint16_t fifoLen, bmx160_fifo_dataset_len_t datasetLen, uint8_t accelRange, uint8_t gyroRange); // call magCompensateFifoData before if mag data included
 		
 		// FIFO
@@ -373,6 +383,11 @@ class IMU_BMX160 {
 		bool readAccFIFOInOneGoFast(uint8_t fifoData[], uint16_t currentFifoLen, bool waitUntilBackInLowPower); // no delays, option to not wait until IMU back in low power mode, pass current fifo length directly
 		static uint8_t countAccFIFOLogs(uint16_t len); // was static, but ESP32 compiler doesn't like it!
 		static int16_t getAccFIFOLog(uint8_t fifoData[], uint16_t len, uint16_t logNumber, uint8_t xyz); // was static, but ESP32 compiler doesn't like it!
+
+		// FIFO evaluation
+		uint32_t calculateFifoActivity(uint8_t *fifoData, uint16_t fifoLen, bool withMag, bool withGyro, uint8_t accelRange, uint32_t minimumMilliG, bool debug); // sums up mg if >= minimumMilliG (without earth gravitation), then divides by number of samples as an average
+		uint32_t calculateFifoODBAAverage(uint8_t *fifoData, uint16_t fifoLen, bool withMag, bool withGyro, uint8_t accelRange, bool debug);
+		uint32_t calculateZeroCrossingsZ(uint8_t *fifoData, uint16_t fifoLen, bool withMag, bool withGyro, uint8_t accelRange, float minRangeG, bool debug);
 		
 		// FIFO interrupt
 		bool enableFIFOInterrupt(uint16_t watermark);
@@ -387,8 +402,12 @@ class IMU_BMX160 {
 		
 		// AnyMotion interrupt (35uA@25Hz if MCU sleeps, 14.5uA@6.25Hz)
 		bool enableAccAnyMotionInterruptXYZ(uint8_t duration, uint8_t threshold); // TRESHOLD DEPENDS ON RANGE (2G, 4G, ..), works in ACC = low power, rest in suspend
+		bool enableAccAnyMotionInterruptXYZWithoutPin(uint8_t duration, uint8_t threshold); // interrupt not triggered in pin
 		uint8_t anyMotionInterruptAxis(); // returns 0 for no or either BMX160_INT_STATUS_ANYMOT_WAS_X, BMX160_INT_STATUS_ANYMOT_WAS_Y or BMX160_INT_STATUS_ANYMOT_WAS_Z
 	
+		// SignificantMotion interrupt
+		bool enableAccSignificantMotionInterruptXYZ(uint8_t threshold, uint8_t skipTime = BMX160_INT_SIGMOT_SKIP_2_56S, uint8_t proofTime = BMX160_INT_SIGMOT_PROOF_0_96S);
+
 		// Flat interrupt
 		bool enableAccFlatDetectionInterrupt(uint8_t flatTheta = 8, uint8_t flatHoldTime = 1, uint8_t flatHysteresis = 1); // works in ACC = low power, rest in suspend
 		bool isFlat(); // only works if flat detection interrupt is enabled

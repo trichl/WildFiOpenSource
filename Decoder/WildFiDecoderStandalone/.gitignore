@@ -1,2 +1,6 @@
 *.csv
 *.bin
+METADATA.txt
+*.bat
+DECODER_LOG.txt
+E4C0_InsideCave

@@ -1,0 +1,34 @@
+https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/index.html#get-started-get-esp-idf
+https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/windows-setup.html
+
+-> ESP-IDF Tools Installer not needed!
+
+1) Install GIT for Windows: https://git-scm.com/download/win (Git-2.35.0-64-bit.exe)
+2) Install Python for Windows: https://www.python.org/downloads/windows/ (Python 3.12.1 with Windows Installer)
+3) Check in CMD.exe if "git" and "python" commands work
+4) Go into parent folder (where GitHub WildFi folder is located) ( /WildFi )
+5) git clone -b v4.1 --recursive https://github.com/espressif/esp-idf.git esp-idf-v4.1
+ - Maybe 4.2 also works?
+ - Maybe apply modifications to esp-idf: https://github.com/espressif/esp-idf/commit/ef10c2576ff14afa033ef22105406399abc570af
+6) go into esp-idf folder then run : install.bat esp32
+ - If there is an error, then get https://visualstudio.microsoft.com/visual-cpp-build-tools/
+7) run : export.bat (re-do needed if cmd was closed)
+8) go into /esp-idf/examples/get-started/blink
+9) idf.py build
+10) check if compiling works
+11) choose an existing project under /WildFi/Firmware or create a new one: /WildFi/Firmware/MyNewAwesomeProject
+- if you created a new project -> copy desired firmware files (*.h und *.cpp) into /main, adjust CMakeLists.txt to include all .cpps and components
+12) run 01_compile.bat to compile the desired project ( the bat file includes the idf.py build process )
+ - might fail if the path on Windows is too long, then modify the .bat file and change 'idf.py build' by : idf.py -B C:\esptmp build
+
+13) Ensure your WildFi is plugged to the computer to flash it. For this you can use the WildFi programming board.
+
+14) to flash, run : 02_flash.bat ( if you also want to monitor the serial port, you could run  : 06_flash_and_monitor.bat )
+
+or flash with :
+
+..\..\..\esp-idf-v4.1\components\esptool_py\esptool\esptool.py -p COM7 -b 460800 --before default_reset --after hard_reset --chip esp32 write_flash --flash_mode dio --flash_size detect --flash_freq 80m 0x1000 build\bootloader\bootloader.bin 0x8000 build\partition_table\partition-table.bin 0x10000 build\wildfi-firmware.bin
+
+More handy commands:
+esptool.py read_mac
+esptool.py flash_id

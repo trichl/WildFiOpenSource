@@ -82,6 +82,7 @@ class RTC_RV8803C7 {
 
 		// interrupt every 1 .. 4096 seconds
 		bool setRegularInterrupt(uint16_t seconds); // TIE, TF, TE -> pin goes low for 7.813ms, first period has time uncertainty of 15.625ms (1Hz timer)
+		bool setRegularInterruptLong(uint16_t seconds);
 		bool disableRegularInterrupt(); // TIE, TF, TE
 		bool regularInterruptHappened(bool &error); // TIE, TF, TE
 

@@ -4,9 +4,10 @@ import net.timm.wildfidecoder.Log;
 import net.timm.wildfidecoder.decoder.imu.IMUSettings;
 
 import java.util.ArrayList;
+import java.util.Locale;
 
-public class EspNowMessage {
-    //public String receiveTime = "";
+public class EspNowMessage implements Comparable {
+    public static String FF_PATTERN = "ffffffffffff";
     public String mac = "";
     public ArrayList<Byte> data = new ArrayList<>();
     public boolean isDataMessage = false;
@@ -15,6 +16,17 @@ public class EspNowMessage {
 
     public int sendPagePointer = 0;
     public int sendPageOffsetPointer = 0;
+
+    public long getByteNumberInFlashMemory() {
+        return (2048 * ((long) sendPagePointer)) + ((long) sendPageOffsetPointer);
+    }
+
+    @Override
+    public int compareTo(Object e) {
+        /* For Ascending order*/
+        int compResult = (int) (this.getByteNumberInFlashMemory() - ((EspNowMessage) e).getByteNumberInFlashMemory());
+        return compResult;
+    }
 
     public static String byteArrayToHex(ArrayList<Byte> a) {
         byte[] result = new byte[a.size()];
@@ -35,9 +47,35 @@ public class EspNowMessage {
         return result;
     }
 
-    void decodeMessage(IMUSettings imuSettings) {
+    public static boolean onlyFFs(String line) {
+        String lineLowerCase = line.toLowerCase();
+        for (int i = 0; i < lineLowerCase.length(); i++) {
+            if (lineLowerCase.charAt(i) != 'f') {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    boolean checkForFFFFFFFFError() {
+        String asHex = byteArrayToHex(data);
+        if(asHex.startsWith(FF_PATTERN) || asHex.endsWith(FF_PATTERN)) {
+            Log.d("decoder", "(" + sendPagePointer + "/" + sendPageOffsetPointer + ") detected possible flash error: " + asHex);
+            //printMe();
+            /*System.out.println("*** Sleep 2 seconds ***");
+            try {
+                TimeUnit.SECONDS.sleep(2);
+            } catch (InterruptedException interruptedException) {
+                interruptedException.printStackTrace();
+            }*/
+            return true;
+        }
+        return false;
+    }
+
+    public boolean decodeMessage(IMUSettings imuSettings) {
         // 3 BYTES PREAMBLE: [ 0000 0000 ] [ 000 | 00000 ] [ 0 | 0000 | 111 ] (11 bits for block, 6 bits for page in block, 4 bits for page part, 3 dummy bits)
-        if (data == null || data.size() < 3) return;
+        if (data == null || data.size() < 3) return false;
 
         if (isDataMessage) {
             int flashPnt = (Byte.toUnsignedInt(data.get(1)) << 24) | (Byte.toUnsignedInt(data.get(2)) << 16) | (Byte.toUnsignedInt(data.get(3)) << 8) | (Byte.toUnsignedInt(data.get(4)));
@@ -60,6 +98,9 @@ public class EspNowMessage {
         } else {
             receivedLength = data.size();
         }
+
+        if(checkForFFFFFFFFError()) { return false; }
+        return true;
     }
 
     public void addData(Byte oneByte) {
@@ -71,13 +112,13 @@ public class EspNowMessage {
         }
     }
 
-    public void printMe() {
+    public void printMe(long i, int dataPnt, int dataLen) {
         if (isDataMessage) {
             String firstBytes = byteArrayToHex(data);
             firstBytes = firstBytes.substring(0, Math.min(firstBytes.length(), 16));
-            Log.d("decoder", "Msg: " + mac + " (" + receivedLength + " byte, data),(" + sendPagePointer + "/" + sendPageOffsetPointer + ")," + firstBytes + "..");
+            Log.d("decoder", "(" + dataPnt + "/" + dataLen + " byte) Msg: " + mac + " (" + receivedLength + " byte, data),(" + sendPagePointer + "/" + sendPageOffsetPointer + ")," + firstBytes + "..");
         } else {
-            Log.d("decoder", "Msg: " + mac + " (" + receivedLength + " byte, no data)," + byteArrayToHex(data));
+            Log.d("decoder", "(" + dataPnt + "/" + dataLen + " byte) Msg: " + mac + " (" + receivedLength + " byte, no data)," + byteArrayToHex(data));
         }
     }
 }

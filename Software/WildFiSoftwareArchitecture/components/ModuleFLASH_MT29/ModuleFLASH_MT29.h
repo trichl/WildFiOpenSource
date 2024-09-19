@@ -22,6 +22,7 @@
 
 // TODO: CREATE MAP FOR BAD BLOCKS AFTER SELF-TEST -> DON'T USE THESE PAGES THEN, STORE IN ESP MEMORY
 
+#define MT29_FLASH_ID							0x242C
 
 #define MT29_CMD_GET_FEATURES					0x0F
 typedef enum {
@@ -51,6 +52,8 @@ typedef enum {
 #define MT29_CMD_PAGE_READ						0x13
 #define MT29_CMD_READ_CACHE_X1					0x03
 #define MT29_CMD_BLOCK_ERASE					0xD8
+#define MT29_CMD_RESET							0xFF
+#define MT29_CMD_READ_ID						0x9F
 
 #define MT29_CACHE_SIZE							2048		// equals size of a single page, don't touch 128 bytes for ECC at end
 #define MT29_CACHE_SIZE_EXTENDED				2176		// with 128 bytes for ECC
@@ -63,6 +66,9 @@ class FLASH_MT29 {
 	public:
 		FLASH_MT29();
 		/** user functions */
+		bool waitOnID();
+		uint16_t readID();
+		bool reset();
 		bool write(uint32_t pageAddress, uint8_t *dataResult, uint16_t dataLen); // dataResult should be DMA allocated memory, pageAddress = 0 - 131071, byteOffset = 0, dataLen = 1 - 2048
 		bool partialWrite(uint32_t pageAddress, uint16_t byteOffset, uint8_t *dataResult, uint16_t dataLen); // dataResult should be DMA allocated memory, pageAddress = 0 - 131071, byteOffset = 0 - 2047, dataLen = 1 - 2048
 		bool partialWriteMock(uint32_t pageAddress, uint16_t byteOffset, uint8_t *dataResult, uint16_t dataLen); // for testing
@@ -80,7 +86,8 @@ class FLASH_MT29 {
 
 		/** FIFO memory functions */
 		uint32_t fifoGetFreeSpace(uint16_t blocksErasedPointer, uint32_t currentPageAddress, uint16_t currentByteOffset, uint32_t fifoSizePages = MT29_NUMBER_PAGES);
-		sequential_write_status_t fifoPushSimple(uint16_t blocksErasedPointer, uint32_t &pageAddressStart, uint16_t &byteOffsetStart, uint8_t *data, uint32_t dataLen, bool readBack, bool debug, uint16_t maxIterations = 128, uint32_t fifoSizePages = MT29_NUMBER_PAGES);
+		sequential_write_status_t fifoPushSimpleSkipBadBlocks(uint16_t blocksErasedPointer, uint32_t &pageAddressStart, uint16_t &byteOffsetStart, uint8_t *data, uint32_t dataLen, bool readBack, bool readBackCorrectFFFFFF, bool debug, uint16_t maxIterations = 128, uint32_t fifoSizePages = MT29_NUMBER_PAGES);
+		sequential_write_status_t fifoPushSimple(uint16_t blocksErasedPointer, uint32_t &pageAddressStart, uint16_t &byteOffsetStart, uint8_t *data, uint32_t dataLen, bool readBack, bool readBackCorrectFFFFFF, bool debug, uint16_t maxIterations = 128, uint32_t fifoSizePages = MT29_NUMBER_PAGES);
 		sequential_write_status_t fifoPush(uint16_t blocksErasedPointer, uint32_t &pageAddressStart, uint16_t &byteOffsetStart, uint8_t *data1, uint32_t dataLen1, uint8_t *data2, uint32_t dataLen2, uint8_t *data3, uint32_t dataLen3, bool debug = false, uint16_t maxIterations = 128, uint32_t fifoSizePages = MT29_NUMBER_PAGES);
 		uint16_t fifoGetNumberOfPopableBlocks(uint16_t blocksErasedPointer, uint32_t currentPageAddress, uint32_t fifoSizePages = MT29_NUMBER_PAGES);
 		uint32_t fifoGetNumberOfPopableBytes(uint32_t sendBytePointer, uint32_t writeBytePointer);

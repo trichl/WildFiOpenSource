@@ -1,8 +1,0 @@
-CMD_NOTHING
-
-----------------
-The first line of this file will configure the gateway:
-CMD_NOTHING = sending no command to the tag (but data will be received)
-CMD_FORCE = forcing the tag to turn on and sample data (data will be received)
-CMD_ACTIVATE = activate tags that are not yet activated (data will be received)
-CMD_DEACTIVATE = de-activate already activated tags (data will be received)

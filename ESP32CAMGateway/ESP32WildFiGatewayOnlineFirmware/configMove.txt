@@ -1,0 +1,102 @@
+- command (COMMAND_BYTE_NOTHING, COMMAND_BYTE_FORCE_TRACKING, COMMAND_BYTE_ACTIVATE, COMMAND_BYTE_DEACTIVATE, COMMAND_BYTE_CHANGE_CONFIG, COMMAND_BYTE_MAG_CALIBRATION, COMMAND_BYTE_DO_NOT_SEND, COMMAND_BYTE_TIME_RESYNC, COMMAND_BYTE_TIME_SYNC_ACTIVATION):
+COMMAND_BYTE_NOTHING
+- doTheBlink (bool):
+true
+- trackerMode (1 byte, 0 = MODE_TESTRUN, 1 = MODE_PRODUCTIVE):
+0
+- trackingDataMode (1 byte, 0 = TRACKING_DATA_MODE_1HZ_GPS_AND_IMU, 1 = TRACKING_DATA_MODE_IMU_SD_DEEP_SLEEP, 2 = TRACKING_DATA_MODE_IMU_HD_LIGHT_SLEEP, 3 = TRACKING_DATA_MODE_DEAD_RECKONING):
+3
+- transmissionMethod (1 byte, 0 = TRANSMISSION_METHOD_ESP_NOW, 1 = TRANSMISSION_METHOD_WIFI):
+0
+- drMinHdopXTen (1 byte):
+30
+- drImuSeconds (2 byte):
+60
+- gps1HzInterruptAfterSeconds (2 byte):
+0
+- accFrequency (1 byte, 1 = 0.78HZ, 2 = 1.56HZ, 3 = 3.12HZ, 4 = 6.25HZ, 5 = 12.5HZ, 6 = 25HZ, 7 = 50HZ, 8 = 100HZ, 9 = 200HZ, 10 = 400HZ, 11 = 800HZ, 12 = 1600HZ):
+6
+- accAvg (1 byte, 0 = AVG1, 1 = AVG2, 2 = AVG4, 3 = AVG8, 4 = AVG16):
+3
+- accRange (1 byte, 3 = 2G, 5 = 4G, 8 = 8G, 12 = 16G):
+8
+- magFrequency (1 byte, 1 = 0.78HZ, 2 = 1.56HZ, 3 = 3.12HZ, 4 = 6.25HZ, 5 = 12.5HZ, 6 = 25HZ, 7 = 50HZ):
+6
+- magAccuracy (1 byte, 0 = LOW POWER, 1 = REGULAR, 2 = ENHANCED, 3 = HIGH):
+1
+- gyroFrequency (1 byte, 6 = 25HZ, 7 = 50HZ, 8 = 100HZ, 9 = 200HZ, 10 = 400HZ, 11 = 800HZ, 12 = 1600HZ):
+6
+- gyroRange (1 byte, 0 = 2000DPS, 1 = 1000DPS, 2 = 500DPS, 3 = 250DPS, 4 = 125DPS):
+4
+- gyroMode (1 byte, 0 = OSR4, 1 = OSR2, 2 = NORMAL):
+2
+- useMagnetometer (bool):
+true
+- useGyro (bool):
+false
+- nightTimeEnter (1 byte, 0 = NIGHTTIME_ALWAYS_NIGHT, 1 = NIGHTTIME_USE_HOURS, 2 = NIGHTTIME_DISABLED, 3 = NIGHTTIME_DURATION_BASED_ON_VOLTAGE_37V, 4 = NIGHTTIME_DURATION_BASED_ON_VOLTAGE_38V, 5 = NIGHTTIME_DURATION_BASED_ON_VOLTAGE_39V, 6 = NIGHTTIME_DURATION_BASED_ON_VOLTAGE_40V):
+2
+- nightTimeMode (1 byte, 1 = NIGHTTIME_MODE_ONLY_SLEEP, 2 = NIGHTTIME_MODE_TRY_DATATRANS):
+2
+- nightTimeTurnOnHour (1 byte):
+5
+- nightTimeTurnOnMinute (1 byte):
+0
+- nightTimeTurnOffHour (1 byte):
+20
+- nightTimeTurnOffMinute (1 byte):
+0
+- nightTimeDataTransDeepestNightHours (4 byte):
+14680065
+- nightTimeModeTryDataTransWakeupSeconds (2 byte):
+180
+- battMinVoltage (2 byte):
+3500
+- battRestartVoltage (2 byte):
+3550
+- dataTransBattMinVoltage (2 byte):
+3500
+- dataTransBattMinVoltageDuringTrans (2 byte):
+3200
+- skipGetTime (bool):
+false
+- timeBetweenGetTimeRetriesSeconds (2 byte):
+60
+- activationMode (1 byte, 0 = ACTIVATION_MODE_SKIP, 1 = ACTIVATION_MODE_STORE_PERMANENTLY, 2 = ACTIVATION_MODE_ON_EVERY_START):
+0
+- activationSource (1 byte, 0 = ACTIVATION_BY_WIFI, 1 = ACTIVATION_BY_ESPNOW)
+1
+- activationByEspNowRetrySeconds (2 byte):
+1200
+- dataTransTryEveryFullMinSeldomly (2 byte):
+60
+- memFullTryEveryFullMinSeldomly (2 byte):
+60
+- accInterruptWatermark (2 byte):
+960
+- dataTransOutputPower (1 byte):
+78
+- espNowCustomRFCalibration (bool):
+true
+- commandByteForceTrackingDurationSeconds (2 byte):
+900
+- espNowDataRate (1 byte):
+14
+- espNowLongRange (bool):
+false
+- espNowMinBytesToTransmit (4 byte):
+1
+- espNowMaxBytesToTransmit (4 byte, -1 = unlimited):
+-1
+- wifiMinBlocksToTransmit (2 byte):
+10
+- wifiMaxBlocksToTransmit (2 byte):
+200
+- activityActivationEnabled (bool):
+false
+- activityThresholdActiveToInactiveAvg (2 byte):
+60
+- activityThresholdInactiveToActiveThr (1 byte):
+4
+- activityTransmissionInterval (2 byte):
+600

@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 // for BSEC offline: gas sampling rate needs to be 1/3Hz or 1/300Hz
+// https://community.bosch-sensortec.com/t5/MEMS-sensors-forum/BME680-Using-BSEC-in-backend/td-p/7521
 	
 #define BARO_BME680_ADDRESS					0x76
 

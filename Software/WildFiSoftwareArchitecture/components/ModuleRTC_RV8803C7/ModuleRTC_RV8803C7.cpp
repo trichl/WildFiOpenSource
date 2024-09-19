@@ -221,6 +221,41 @@ bool RTC_RV8803C7::reenableTimeUpdateInterruptMinuteChange() {
 	return !writeError;
 }
 
+bool RTC_RV8803C7::setRegularInterruptLong(uint16_t minutes) {
+	uint8_t sec_lwr = ((minutes >> 0) & 0xff);
+	uint8_t sec_upr = ((minutes >> 8) & 0xff);
+	
+	bool readError = false;
+	bool writeError = false;
+	if((minutes > 4096) || (minutes == 0)) { // 12 bit maximum size, max ~1 hour (can be higher if clock frequency TD is set lower)
+		return false;
+	}
+	
+	// read relevant registers
+	uint8_t reg_control = i2c.readRegister(RTC_RV8803C7_ADDRESS, REG8803_CONTROL, readError);
+	if(readError) { return false; }
+	uint8_t reg_flag = i2c.readRegister(RTC_RV8803C7_ADDRESS, REG8803_FLAG, readError);
+	if(readError) { return false; }
+	uint8_t reg_extension = i2c.readRegister(RTC_RV8803C7_ADDRESS, REG8803_EXTENSION, readError);
+	if(readError) { return false; }
+	
+	// write relevant registers
+	writeError |= !i2c.writeRegister(RTC_RV8803C7_ADDRESS, REG8803_CONTROL, HelperBits::setBit(reg_control, REG8803_CONTROL_TIE, 0)); // 0x0F: TIE = 0 (disable interrupts shortly)
+	writeError |= !i2c.writeRegister(RTC_RV8803C7_ADDRESS, REG8803_FLAG, HelperBits::setBit(reg_flag, REG8803_FLAG_TF, 0)); // 0x0E: TF = 0 (clear timer interrupt event)
+	
+	reg_extension = HelperBits::setBit(reg_extension, REG8803_EXTENSION_TE, 0); // 0x0D: TE = 0 (disable timer)
+	reg_extension = HelperBits::setBit(reg_extension, REG8803_EXTENSION_TD0, 1); // 0x0D: TD = 11 (countdown clock frequency = 1/60Hz = 60s)
+	reg_extension = HelperBits::setBit(reg_extension, REG8803_EXTENSION_TD1, 1); // 0x0D: TD = 11 (countdown clock frequency = 1/60Hz = 60s)
+	writeError |= !i2c.writeRegister(RTC_RV8803C7_ADDRESS, REG8803_EXTENSION, reg_extension);
+	
+	writeError |= !i2c.writeRegister(RTC_RV8803C7_ADDRESS, REG8803_TIMER_CNT0, sec_lwr); // 0x0B: Countdown value, lower byte (seconds)
+	writeError |= !i2c.writeRegister(RTC_RV8803C7_ADDRESS, REG8803_TIMER_CNT1, sec_upr); // 0x0C: Countdown value, upper byte (seconds)
+	writeError |= !i2c.writeRegister(RTC_RV8803C7_ADDRESS, REG8803_CONTROL, HelperBits::setBit(reg_control, REG8803_CONTROL_TIE, 1)); // 0x0F: TIE = 1 (get INT pin interrupts)
+	writeError |= !i2c.writeRegister(RTC_RV8803C7_ADDRESS, REG8803_EXTENSION, HelperBits::setBit(reg_extension, REG8803_EXTENSION_TE, 1)); // 0x0D: TE = 1 (enable countdown) -> NOW STARTING!!!
+	
+	return !writeError;
+}
+
 bool RTC_RV8803C7::setRegularInterrupt(uint16_t seconds) {
 	uint8_t sec_lwr = ((seconds >> 0) & 0xff);
 	uint8_t sec_upr = ((seconds >> 8) & 0xff);
