@@ -8,7 +8,7 @@
 
 3. A new window opens. Copy " https://github.com/espressif/arduino-esp32/releases/download/1.0.4/package_esp32_index.json  " and **paste it** next to *Additional boards manager URLs* in the dedicated field. You can then close the *Preferences* window.
 
-4. Go to Tools -> Board -> *Board Manager* and in the research field type **ESP32**. You should find a package from Espressif Systems. Please choose version 1.0.4! **Install it**
+4. Go to Tools -> Board -> *Board Manager* and in the research field type **ESP32**. You should find a package from Espressif Systems. Please choose version 1.0.4. **Install it**
 
 5. You can go back to -  Tools -> Board -  and you should now see an esp32 entry. Hover it and **select ESP32 Wrover Module**.
 
